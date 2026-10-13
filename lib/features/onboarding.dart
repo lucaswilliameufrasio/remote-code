@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../core/security.dart';
 import 'common.dart';
 import 'design.dart';
@@ -38,7 +41,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   bool _isBusy = false;
   bool? _biometricsAvailable;
   String? _recoveryPhrase;
+  String? _copiedRecoveryPhrase;
   String? _errorMessage;
+  Timer? _clipboardClearTimer;
 
   AppSecurity get security => widget.security;
 
@@ -187,6 +192,103 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         setState(() => _isBusy = false);
       }
     }
+  }
+
+  Future<void> _copyRecoveryPhrase() async {
+    final phrase = _recoveryPhrase;
+    if (phrase == null) {
+      setState(() => _errorMessage = 'Gere uma nova frase de recuperação.');
+      return;
+    }
+
+    try {
+      await Clipboard.setData(ClipboardData(text: phrase));
+      _clipboardClearTimer?.cancel();
+      _copiedRecoveryPhrase = phrase;
+      _clipboardClearTimer = Timer(const Duration(seconds: 60), () {
+        unawaited(_expireCopiedRecoveryPhrase(phrase));
+      });
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content:
+              Text('Frase copiada. O app tentará limpá-la em 60 segundos.'),
+        ),
+      );
+    } on PlatformException {
+      if (mounted) {
+        setState(() {
+          _errorMessage =
+              'Não foi possível copiar a frase para a área de transferência.';
+        });
+      }
+    } on MissingPluginException {
+      if (mounted) {
+        setState(() {
+          _errorMessage = 'A cópia não está disponível neste dispositivo.';
+        });
+      }
+    }
+  }
+
+  Future<void> _expireCopiedRecoveryPhrase(String phrase) async {
+    final wasCleared = await _clearClipboardIfUnchanged(phrase);
+    if (_copiedRecoveryPhrase == phrase) {
+      _copiedRecoveryPhrase = null;
+    }
+    if (!wasCleared && mounted && _stage == _OnboardingStage.recovery) {
+      _showClipboardCleanupWarning();
+    }
+  }
+
+  Future<void> _continueAfterSavingRecoveryPhrase() async {
+    final copiedPhrase = _copiedRecoveryPhrase;
+    _clipboardClearTimer?.cancel();
+    _clipboardClearTimer = null;
+
+    var clipboardWasCleared = true;
+    if (copiedPhrase != null) {
+      clipboardWasCleared = await _clearClipboardIfUnchanged(copiedPhrase);
+    }
+    _copiedRecoveryPhrase = null;
+    if (!mounted) {
+      return;
+    }
+    if (!clipboardWasCleared) {
+      _showClipboardCleanupWarning();
+    }
+
+    _recoveryController.clear();
+    setState(() {
+      _stage = _OnboardingStage.confirmRecovery;
+      _errorMessage = null;
+    });
+  }
+
+  Future<bool> _clearClipboardIfUnchanged(String phrase) async {
+    try {
+      final clipboardData = await Clipboard.getData(Clipboard.kTextPlain);
+      if (clipboardData?.text != phrase) {
+        return true;
+      }
+      await Clipboard.setData(const ClipboardData(text: ''));
+      return true;
+    } on PlatformException {
+      return false;
+    } on MissingPluginException {
+      return false;
+    }
+  }
+
+  void _showClipboardCleanupWarning() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content:
+            Text('Não foi possível limpar a frase da área de transferência.'),
+      ),
+    );
   }
 
   void _back() {
@@ -517,9 +619,18 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           ),
         ),
         const SizedBox(height: 14),
+        SizedBox(
+          width: double.infinity,
+          child: OutlinedButton.icon(
+            onPressed: _copyRecoveryPhrase,
+            icon: const Icon(Icons.copy_outlined),
+            label: const Text('Copiar frase de recuperação'),
+          ),
+        ),
+        const SizedBox(height: 12),
         const InfoBox(
-          'Anote em papel e guarde em local seguro ou salve em um gerenciador de senhas confiável. Não compartilhe nem deixe a frase na área de transferência.',
-          icon: Icons.security,
+          'Anote e guarde em local seguro ou copie para um gerenciador de senhas confiável. Outros apps podem acessar ou sincronizar a área de transferência; o Remoto tentará apagar esta frase após 60 segundos ou quando você avançar.',
+          icon: Icons.warning_amber_outlined,
         ),
       ],
     );
@@ -625,13 +736,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           _primaryButton(
             label: 'Já salvei em local seguro',
             icon: Icons.check,
-            onPressed: () {
-              _recoveryController.clear();
-              setState(() {
-                _stage = _OnboardingStage.confirmRecovery;
-                _errorMessage = null;
-              });
-            },
+            onPressed: _continueAfterSavingRecoveryPhrase,
           ),
         ],
       _OnboardingStage.confirmRecovery => [

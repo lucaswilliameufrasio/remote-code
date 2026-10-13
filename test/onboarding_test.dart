@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:local_auth/local_auth.dart' show BiometricType;
@@ -165,5 +166,72 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Seu trabalho,\nsem interrupções.'), findsOneWidget);
+  });
+
+  testWidgets('Should copy and safely clear the recovery phrase',
+      (tester) async {
+    final store = createStore();
+    await store.load();
+
+    var clipboardText = '';
+    final binaryMessenger = tester.binding.defaultBinaryMessenger;
+    binaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (methodCall) async {
+        if (methodCall.method == 'Clipboard.setData') {
+          final arguments =
+              Map<String, dynamic>.from(methodCall.arguments as Map);
+          clipboardText = arguments['text'] as String;
+          return null;
+        }
+        if (methodCall.method == 'Clipboard.getData') {
+          return <String, dynamic>{'text': clipboardText};
+        }
+        return null;
+      },
+    );
+    addTearDown(() {
+      binaryMessenger.setMockMethodCallHandler(SystemChannels.platform, null);
+    });
+
+    await tester.pumpWidget(RemoteDevApp(store: store));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Começar'));
+    await tester.tap(find.text('Começar'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byType(SwitchListTile).first);
+    await tester.tap(find.byType(SwitchListTile).first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Continuar com senha'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+        find.bySemanticsLabel('Senha'), 'original test password');
+    await tester.enterText(
+      find.bySemanticsLabel('Confirme a senha'),
+      'original test password',
+    );
+    await tester.ensureVisible(find.text('Gerar frase de recuperação'));
+    await tester.tap(find.text('Gerar frase de recuperação'));
+    await tester.pumpAndSettle();
+    expect(find.text('Guarde sua frase de recuperação'), findsOneWidget);
+    await tester.ensureVisible(find.text('Copiar frase de recuperação'));
+    await tester.tap(find.text('Copiar frase de recuperação'));
+    await tester.pumpAndSettle();
+
+    expect(clipboardText.split(' ').length, 12);
+
+    await tester.pump(const Duration(seconds: 61));
+    await tester.pump();
+    expect(clipboardText, isEmpty);
+
+    await tester.ensureVisible(find.text('Copiar frase de recuperação'));
+    await tester.tap(find.text('Copiar frase de recuperação'));
+    await tester.pumpAndSettle();
+    expect(clipboardText.split(' ').length, 12);
+
+    clipboardText = 'different clipboard content';
+    await tester.pump(const Duration(seconds: 61));
+    await tester.pump();
+    expect(clipboardText, 'different clipboard content');
   });
 }
