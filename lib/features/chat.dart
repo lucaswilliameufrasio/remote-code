@@ -13,11 +13,13 @@ class ChatScreen extends StatefulWidget {
   final AppStore store;
   final Machine machine;
   final Session session;
+  final OpenCodeApi? apiOverride;
   const ChatScreen(
       {super.key,
       required this.store,
       required this.machine,
-      required this.session});
+      required this.session,
+      this.apiOverride});
   @override
   State<ChatScreen> createState() => _ChatScreenState();
 }
@@ -43,17 +45,20 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   bool fetching = false,
       sending = false,
       paused = false,
-      settingsLoading = true;
+      agentsLoading = true,
+      modelsLoading = true;
   bool showLatestButton = false;
   final Set<String> queueMutations = {};
   int failures = 0, generation = 0;
+  int settingsGeneration = 0;
+  final ValueNotifier<int> settingsSheetRevision = ValueNotifier(0);
   Timer? poll, draftTimer;
   bool get busy => status == 'running' || status == 'busy' || status == 'retry';
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    api = OpenCodeApi(widget.machine);
+    api = widget.apiOverride ?? OpenCodeApi(widget.machine);
     session = widget.session;
     scroll.addListener(_updateLatestButton);
     input = TextEditingController(
@@ -65,22 +70,46 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _settings() async {
-    final results = await Future.wait<dynamic>([
-      _loadAgents(),
-      _loadProviders(),
-    ]);
+    final currentGeneration = ++settingsGeneration;
     if (!mounted) {
       return;
     }
-    final agentResult = results[0] as (List<Json>?, String?);
-    final providerResult = results[1] as (Json?, String?);
     setState(() {
-      agents = agentResult.$1 ?? [];
-      agentSettingsError = agentResult.$2;
-      providers = providerResult.$1 ?? {};
-      modelSettingsError = providerResult.$2;
-      settingsLoading = false;
+      agentsLoading = true;
+      modelsLoading = true;
     });
+    settingsSheetRevision.value++;
+
+    await Future.wait<void>([
+      _updateAgents(currentGeneration),
+      _updateProviders(currentGeneration),
+    ]);
+  }
+
+  Future<void> _updateAgents(int currentGeneration) async {
+    final result = await _loadAgents();
+    if (!mounted || currentGeneration != settingsGeneration) {
+      return;
+    }
+    setState(() {
+      agents = result.$1 ?? [];
+      agentSettingsError = result.$2;
+      agentsLoading = false;
+    });
+    settingsSheetRevision.value++;
+  }
+
+  Future<void> _updateProviders(int currentGeneration) async {
+    final result = await _loadProviders();
+    if (!mounted || currentGeneration != settingsGeneration) {
+      return;
+    }
+    setState(() {
+      providers = result.$1 ?? {};
+      modelSettingsError = result.$2;
+      modelsLoading = false;
+    });
+    settingsSheetRevision.value++;
   }
 
   Future<(List<Json>?, String?)> _loadAgents() async {
@@ -140,6 +169,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     poll?.cancel();
     draftTimer?.cancel();
     scroll.removeListener(_updateLatestButton);
+    settingsSheetRevision.dispose();
     _saveDraft();
     api.close();
     input.dispose();
@@ -580,36 +610,41 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _chooseAgent() async {
-    final availableOptions = <SearchableOption>[];
-    for (final availableAgent in agents) {
-      final id = availableAgent['id'];
-      if (id is! String) {
-        continue;
-      }
-      availableOptions.add(
-        SearchableOption(
-          value: id,
-          label: availableAgent['name'] as String? ?? id,
-          subtitle: availableAgent['description'] as String?,
-          searchTerms: id,
-        ),
-      );
-    }
     final selection = await showModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
       isScrollControlled: true,
-      builder: (_) => SearchableChoiceSheet(
-        title: 'Escolher agente',
-        selectedValue: agent,
-        defaultLabel: 'Agente padrão',
-        options: availableOptions,
-        isLoading: settingsLoading,
-        emptyMessage: agentSettingsError == null
-            ? 'Nenhum agente adicional disponível neste diretório.'
-            : 'Não foi possível carregar agentes. Tente novamente ou use o padrão do servidor.',
-        searchHint: 'Buscar agente',
-        optionIcon: Icons.smart_toy_outlined,
+      builder: (_) => ValueListenableBuilder<int>(
+        valueListenable: settingsSheetRevision,
+        builder: (context, revision, _) {
+          final availableOptions = <SearchableOption>[];
+          for (final availableAgent in agents) {
+            final id = availableAgent['id'];
+            if (id is! String) {
+              continue;
+            }
+            availableOptions.add(
+              SearchableOption(
+                value: id,
+                label: availableAgent['name'] as String? ?? id,
+                subtitle: availableAgent['description'] as String?,
+                searchTerms: id,
+              ),
+            );
+          }
+          return SearchableChoiceSheet(
+            title: 'Escolher agente',
+            selectedValue: agent,
+            defaultLabel: 'Agente padrão',
+            options: availableOptions,
+            isLoading: agentsLoading,
+            emptyMessage: agentSettingsError == null
+                ? 'Nenhum agente adicional disponível neste diretório.'
+                : 'Não foi possível carregar agentes. Tente novamente ou use o padrão do servidor.',
+            searchHint: 'Buscar agente',
+            optionIcon: Icons.smart_toy_outlined,
+          );
+        },
       ),
     );
     if (selection != null && mounted) {
@@ -618,31 +653,36 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _chooseModel() async {
-    final availableOptions = <SearchableOption>[];
-    for (final availableModel in models) {
-      availableOptions.add(
-        SearchableOption(
-          value: availableModel.$1,
-          label: availableModel.$2,
-          searchTerms: availableModel.$1,
-        ),
-      );
-    }
     final selection = await showModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
       isScrollControlled: true,
-      builder: (_) => SearchableChoiceSheet(
-        title: 'Escolher modelo',
-        selectedValue: modelKey,
-        defaultLabel: 'Padrão ou modelo anterior',
-        options: availableOptions,
-        isLoading: settingsLoading,
-        emptyMessage: modelSettingsError == null
-            ? 'Nenhum modelo habilitado disponível.'
-            : 'Não foi possível carregar modelos. Tente novamente ou use o padrão do servidor.',
-        searchHint: 'Buscar por modelo ou provedor',
-        optionIcon: Icons.auto_awesome_outlined,
+      builder: (_) => ValueListenableBuilder<int>(
+        valueListenable: settingsSheetRevision,
+        builder: (context, revision, _) {
+          final availableOptions = <SearchableOption>[];
+          for (final availableModel in models) {
+            availableOptions.add(
+              SearchableOption(
+                value: availableModel.$1,
+                label: availableModel.$2,
+                searchTerms: availableModel.$1,
+              ),
+            );
+          }
+          return SearchableChoiceSheet(
+            title: 'Escolher modelo',
+            selectedValue: modelKey,
+            defaultLabel: 'Padrão ou modelo anterior',
+            options: availableOptions,
+            isLoading: modelsLoading,
+            emptyMessage: modelSettingsError == null
+                ? 'Nenhum modelo habilitado disponível.'
+                : 'Não foi possível carregar modelos. Tente novamente ou use o padrão do servidor.',
+            searchHint: 'Buscar por modelo ou provedor',
+            optionIcon: Icons.auto_awesome_outlined,
+          );
+        },
       ),
     );
     if (selection != null && mounted) {
@@ -651,7 +691,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _refreshSettings() async {
-    setState(() => settingsLoading = true);
     await _settings();
   }
 
