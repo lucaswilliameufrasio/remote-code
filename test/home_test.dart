@@ -14,6 +14,7 @@ void main() {
       (tester) async {
     final store = AppStore();
     await store.load();
+    await store.security.completeWithoutProtection();
 
     await tester.pumpWidget(RemoteDevApp(store: store));
     await tester.pumpAndSettle();

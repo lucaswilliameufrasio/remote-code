@@ -21,6 +21,16 @@ class NativeConfigurationTest(unittest.TestCase):
         manifest.write_text('''<manifest xmlns:android="http://schemas.android.com/apk/res/android">
           <application android:name="${applicationName}"><activity android:name=".MainActivity" /></application>
         </manifest>''')
+        activity = self.android / 'app/src/main/kotlin/example/MainActivity.kt'
+        activity.parent.mkdir(parents=True)
+        activity.write_text('''import io.flutter.embedding.android.FlutterActivity
+class MainActivity : FlutterActivity()''')
+        styles = self.android / 'app/src/main/res/values/styles.xml'
+        styles.parent.mkdir(parents=True)
+        styles.write_text('''<resources>
+  <style name="LaunchTheme" parent="@android:style/Theme.Light.NoTitleBar" />
+  <style name="NormalTheme" parent="@android:style/Theme.Light.NoTitleBar" />
+</resources>''')
         self.gradle = self.android / 'app/build.gradle.kts'
         self.gradle.write_text('android { defaultConfig { minSdk = flutter.minSdkVersion } }')
         self.ios = self.root / 'ios'
@@ -39,19 +49,25 @@ class NativeConfigurationTest(unittest.TestCase):
     def plist(self):
         with (self.ios / 'Runner/Info.plist').open('rb') as stream:
             return plistlib.load(stream)
-    def test_android_network_permission_in_release_manifest(self):
+    def test_android_permissions_and_fragment_activity_for_biometrics(self):
         bootstrap.configure_android(self.android, False)
         root = self.manifest()
         names = [v.get(f'{{{bootstrap.ANDROID}}}name') for v in root.findall('uses-permission')]
-        self.assertEqual(names, ['android.permission.INTERNET'])
+        self.assertEqual(names, ['android.permission.INTERNET', 'android.permission.USE_BIOMETRIC'])
         self.assertEqual(root.find('application').get(f'{{{bootstrap.ANDROID}}}usesCleartextTraffic'), 'false')
         self.assertEqual(root.find('application').get(f'{{{bootstrap.ANDROID}}}allowBackup'), 'false')
-        self.assertIn('minSdk = 23', self.gradle.read_text())
+        self.assertIn('minSdk = 24', self.gradle.read_text())
+        activity = self.android / 'app/src/main/kotlin/example/MainActivity.kt'
+        self.assertIn('FlutterFragmentActivity', activity.read_text())
+        styles = (self.android / 'app/src/main/res/values/styles.xml').read_text()
+        self.assertEqual(styles.count('Theme.AppCompat.DayNight.NoActionBar'), 2)
     def test_repeated_configuration_does_not_duplicate_permission(self):
         bootstrap.configure_android(self.android, False)
         bootstrap.configure_android(self.android, False)
-        self.assertEqual(len(self.manifest().findall('uses-permission')), 1)
+        self.assertEqual(len(self.manifest().findall('uses-permission')), 2)
         self.assertEqual(len(self.manifest().findall('application/activity')), 1)
+        styles = (self.android / 'app/src/main/res/values/styles.xml').read_text()
+        self.assertEqual(styles.count('Theme.AppCompat.DayNight.NoActionBar'), 2)
     def test_android_http_opt_in(self):
         bootstrap.configure_android(self.android, True)
         self.assertEqual(self.manifest().find('application').get(f'{{{bootstrap.ANDROID}}}usesCleartextTraffic'), 'true')
@@ -62,6 +78,7 @@ class NativeConfigurationTest(unittest.TestCase):
         self.assertEqual(info['CFBundleIdentifier'], '$(PRODUCT_BUNDLE_IDENTIFIER)')
         self.assertEqual(info['OtherSetting'], 'preserve')
         self.assertEqual(info['CFBundleDisplayName'], 'Remoto')
+        self.assertEqual(info['NSFaceIDUsageDescription'], 'Usar Face ID para desbloquear o Remoto.')
         with (self.ios / 'Runner/Runner.entitlements').open('rb') as stream:
             self.assertEqual(plistlib.load(stream)['keychain-access-groups'], [])
         self.assertIn('CODE_SIGN_ENTITLEMENTS = Runner/Runner.entitlements;',
@@ -84,7 +101,16 @@ class NativeConfigurationTest(unittest.TestCase):
         groovy = self.android / 'app/build.gradle'
         groovy.write_text('minSdkVersion flutter.minSdkVersion')
         bootstrap.configure_android(self.android, False)
-        self.assertEqual(groovy.read_text(), 'minSdkVersion 23')
+        self.assertEqual(groovy.read_text(), 'minSdkVersion 24')
+
+    def test_android_minimum_sdk_is_raised_without_lowering_newer_values(self):
+        self.gradle.write_text('minSdk = 23')
+        bootstrap.configure_android(self.android, False)
+        self.assertEqual(self.gradle.read_text(), 'minSdk = 24')
+
+        self.gradle.write_text('minSdk = 26')
+        bootstrap.configure_android(self.android, False)
+        self.assertEqual(self.gradle.read_text(), 'minSdk = 26')
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

@@ -1,4 +1,4 @@
-.PHONY: help setup bootstrap get format format-check analyze lint test test-bootstrap validate apk-debug ios-preview-build ios-release build-check devices doctor clean
+.PHONY: help setup bootstrap get format format-check analyze lint test test-bootstrap test-ios-simulator validate apk-debug ios-preview-build ios-release build-check devices doctor clean
 
 .DEFAULT_GOAL := help
 
@@ -14,10 +14,10 @@ get: ## Install Flutter dependencies
 	flutter pub get
 
 format: ## Format Dart source and tests
-	dart format lib test
+	dart format lib test integration_test test_driver
 
 format-check: ## Check Dart formatting without changing files
-	dart format --output=none --set-exit-if-changed lib test
+	dart format --output=none --set-exit-if-changed lib test integration_test test_driver
 
 analyze: ## Run Flutter static analysis
 	flutter analyze --no-fatal-infos
@@ -29,6 +29,9 @@ test: ## Run all Flutter tests
 
 test-bootstrap: ## Test native project configuration
 	python3 scripts/test_bootstrap.py
+
+test-ios-simulator: ## Run the onboarding integration test on a booted iOS Simulator
+	flutter drive --driver=test_driver/integration_test.dart --target=integration_test/onboarding_test.dart
 
 validate: format-check analyze test test-bootstrap ## Run formatting, analysis, and all tests
 

@@ -22,6 +22,8 @@ celular. O nome comercial é provisório; o projeto técnico se chama `remote_de
   do agente.
 - Até 100 atalhos recentes de sessões, identificados por máquina + ID, com
   diretório e rascunho persistentes.
+- Onboarding inicial com bloqueio local opcional por senha, biometria do
+  dispositivo ou ambos; recuperação da senha por frase BIP-39 de 12 palavras.
 - Atualização a cada 3 segundos em primeiro plano; reconexão com espera de até
   30 segundos. Ao retornar ao app, recarrega o histórico do servidor.
 - Instaladores de serviço Linux/systemd e macOS/LaunchAgent.
@@ -150,11 +152,14 @@ no Keychain do simulador.
 
 ```bash
 python3 scripts/bootstrap.py
-dart format lib test
+dart format lib test integration_test test_driver
 flutter analyze --no-fatal-infos
 flutter test
+make test-ios-simulator
 flutter run
 ```
+
+`make test-ios-simulator` executa o onboarding em um iOS Simulator inicializado.
 
 Para gerar o APK de desenvolvimento ou o APK em modo release:
 
@@ -261,6 +266,26 @@ atualizado; servidores que só oferecem a API v1 não são compatíveis.
 
 Permissões e formulários pendentes são consultados por sessão. O app não aprova
 permissões automaticamente.
+
+## Proteção local do aplicativo
+
+Na primeira abertura, escolha senha, biometria, as duas opções ou continue sem
+bloqueio. Quando habilitada, a tela de bloqueio aparece ao abrir o app e ao
+retornar do segundo plano. A biometria usa Face ID/Touch ID ou a autenticação do
+dispositivo como alternativa. No Android, o projeto usa o prompt biométrico do
+sistema.
+
+A senha tem no mínimo oito caracteres. O app guarda somente um verificador com
+salt, derivado com PBKDF2-HMAC-SHA-256; a senha não é enviada ao servidor. Ao
+configurá-la, o app gera uma frase BIP-39 de 12 palavras, mostra-a uma vez e pede
+que seja digitada novamente. Guarde-a em um gerenciador de senhas confiável ou
+em outro local seguro e privado. Ela permite redefinir a senha local; não é
+possível recuperar a frase pelo app.
+
+Essa senha é uma barreira adicional de interface, não uma chave de criptografia
+do cofre local. Credenciais e dados locais continuam no Keychain/Keystore do
+sistema operacional, e a proteção do dispositivo continua necessária. O modelo
+de autenticação e os contratos da API OpenCode v2 não mudam.
 
 Sem terminal SSH interativo, editor completo, upload de anexos, notificações push,
 VPN embutida ou sincronização de credenciais entre celulares nesta entrega.

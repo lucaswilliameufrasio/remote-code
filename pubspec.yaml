@@ -10,8 +10,13 @@ dependencies:
   http: ^1.2.2
   flutter_secure_storage: ^9.2.4
   flutter_markdown: ^0.7.7
+  bip39: ^1.0.6
+  cryptography: ^2.7.0
+  local_auth: ^2.3.0
 dev_dependencies:
   flutter_test:
+    sdk: flutter
+  integration_test:
     sdk: flutter
   flutter_lints: ^5.0.0
 flutter:

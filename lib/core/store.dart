@@ -2,21 +2,36 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'models.dart';
+import 'security.dart';
 
 class AppStore extends ChangeNotifier {
   final FlutterSecureStorage storage;
-  AppStore({FlutterSecureStorage? storage})
-      : storage = storage ??
+  late final AppSecurity security;
+
+  AppStore({
+    FlutterSecureStorage? storage,
+    AppSecurity? security,
+  }) : storage = storage ??
             const FlutterSecureStorage(
-                aOptions: AndroidOptions(encryptedSharedPreferences: true),
-                iOptions: IOSOptions(
-                    accessibility:
-                        KeychainAccessibility.first_unlock_this_device));
+              aOptions: AndroidOptions(encryptedSharedPreferences: true),
+              iOptions: IOSOptions(
+                accessibility: KeychainAccessibility.first_unlock_this_device,
+              ),
+            ) {
+    this.security = security ?? AppSecurity(storage: this.storage);
+  }
+
   List<Machine> machines = [];
   List<Bookmark> bookmarks = [];
   String? error;
   Future<void> _pending = Future.value();
+
   Future<void> load() async {
+    await security.load();
+    if (security.error != null) {
+      return;
+    }
+
     try {
       final raw = await storage.read(key: 'remote_dev_v1');
       if (raw == null) return;

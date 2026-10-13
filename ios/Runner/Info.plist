@@ -33,6 +33,8 @@
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Conectar aos teus servidores OpenCode pela rede privada Tailscale.</string>
+	<key>NSFaceIDUsageDescription</key>
+	<string>Usar Face ID para desbloquear o Remoto.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

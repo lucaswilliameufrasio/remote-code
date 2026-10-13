@@ -19,23 +19,64 @@ def configure_android(path: pathlib.Path, allow_http: bool):
     manifest = path / 'app/src/main/AndroidManifest.xml'
     tree = ET.parse(manifest)
     root = tree.getroot()
-    if not any(p.get(f'{{{ANDROID}}}name') == 'android.permission.INTERNET'
-               for p in root.findall('uses-permission')):
-        ET.SubElement(root, 'uses-permission', {f'{{{ANDROID}}}name': 'android.permission.INTERNET'})
+    for permission in ('android.permission.INTERNET', 'android.permission.USE_BIOMETRIC'):
+        if not any(p.get(f'{{{ANDROID}}}name') == permission
+                   for p in root.findall('uses-permission')):
+            ET.SubElement(root, 'uses-permission', {f'{{{ANDROID}}}name': permission})
     app = root.find('application')
     app.set(f'{{{ANDROID}}}label', 'Remoto')
     app.set(f'{{{ANDROID}}}allowBackup', 'false')
     app.set(f'{{{ANDROID}}}usesCleartextTraffic', 'true' if allow_http else 'false')
     tree.write(manifest, encoding='utf-8', xml_declaration=True)
+
+    for main_activity in path.glob('app/src/main/kotlin/**/MainActivity.kt'):
+        text = main_activity.read_text()
+        text = text.replace(
+            'import io.flutter.embedding.android.FlutterActivity',
+            'import io.flutter.embedding.android.FlutterFragmentActivity',
+        )
+        text = text.replace(': FlutterActivity()', ': FlutterFragmentActivity()')
+        main_activity.write_text(text)
+
+    for main_activity in path.glob('app/src/main/java/**/MainActivity.java'):
+        text = main_activity.read_text()
+        text = text.replace(
+            'import io.flutter.embedding.android.FlutterActivity;',
+            'import io.flutter.embedding.android.FlutterFragmentActivity;',
+        )
+        text = text.replace('extends FlutterActivity', 'extends FlutterFragmentActivity')
+        main_activity.write_text(text)
+
+    styles = path / 'app/src/main/res/values/styles.xml'
+    if styles.exists():
+        text = styles.read_text()
+        text = text.replace(
+            'parent="@android:style/Theme.Light.NoTitleBar"',
+            'parent="Theme.AppCompat.DayNight.NoActionBar"',
+        )
+        styles.write_text(text)
+
     gradle = path / 'app/build.gradle.kts'
     if gradle.exists():
         text = gradle.read_text()
-        text = re.sub(r'minSdk\s*=\s*flutter.minSdkVersion', 'minSdk = 23', text)
+        text = re.sub(
+            r'(minSdk\s*=\s*)(flutter\.minSdkVersion|\d+)',
+            lambda match: match.group(1) + '24'
+            if match.group(2) == 'flutter.minSdkVersion' or int(match.group(2)) < 24
+            else match.group(0),
+            text,
+        )
         gradle.write_text(text)
     else:
         gradle = path / 'app/build.gradle'
         text = gradle.read_text()
-        text = re.sub(r'minSdk(?:Version)?\s+flutter.minSdkVersion', 'minSdkVersion 23', text)
+        text = re.sub(
+            r'(minSdk(?:Version)?\s+)(flutter\.minSdkVersion|\d+)',
+            lambda match: match.group(1) + '24'
+            if match.group(2) == 'flutter.minSdkVersion' or int(match.group(2)) < 24
+            else match.group(0),
+            text,
+        )
         gradle.write_text(text)
 
 def configure_ios(path: pathlib.Path, allow_http: bool):
@@ -44,6 +85,7 @@ def configure_ios(path: pathlib.Path, allow_http: bool):
         data = plistlib.load(stream)
     data['CFBundleDisplayName'] = 'Remoto'
     data['NSLocalNetworkUsageDescription'] = 'Conectar aos teus servidores OpenCode pela rede privada Tailscale.'
+    data['NSFaceIDUsageDescription'] = 'Usar Face ID para desbloquear o Remoto.'
     # HTTPS is default. Direct tailnet HTTP is a developer opt-in.
     data['NSAppTransportSecurity'] = {'NSAllowsArbitraryLoads': allow_http}
     with info.open('wb') as stream:
