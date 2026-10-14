@@ -10,22 +10,24 @@ celular. O nome comercial é provisório; o projeto técnico se chama `remote_de
 - HTTP Basic Auth, senha e dados locais no Android Keystore/iOS Keychain.
 - API HTTP OpenCode v2: sessões globais paginadas com busca por cursor opaco.
 - Listagem por diretório, cadastro de caminhos e abertura direta pelo ID.
-- Chat com as 200 mensagens mais recentes, abertura ancorada na última mensagem,
-  atalho para voltar ao fim, Markdown e ações de ferramenta recolhidas.
+- Chat com 30 mensagens recentes no primeiro carregamento e histórico paginado por
+  cursor ao rolar para mensagens antigas; atualizações recentes preservam o histórico
+  carregado, com Markdown e ações de ferramenta recolhidas.
 - Busca de agentes e modelos; mensagens podem ser enfileiradas durante uma execução.
   Editar uma mensagem de texto pendente substitui o original e coloca a versão nova
   no fim, pois a API OpenCode v2 não edita texto em posição. Mensagens com anexos ou
   referências não compatíveis ficam protegidas contra substituição.
 - MCPs com status e ações de conexão, skills disponíveis e ativação na sessão.
   Conectar/desconectar MCPs altera o estado em runtime até reiniciar o OpenCode.
-- Aprovação de permissões uma vez, sempre ou negar, além de respostas às perguntas
-  do agente.
+- Aprovação de permissões uma vez, sempre ou negar; perguntas pendentes em destaque,
+  com respostas por opção ou texto próprio e navegação entre perguntas.
 - Até 100 atalhos recentes de sessões, identificados por máquina + ID, com
   diretório e rascunho persistentes.
 - Onboarding inicial com bloqueio local opcional por senha, biometria do
   dispositivo ou ambos; recuperação da senha por frase BIP-39 de 12 palavras.
-- Atualização a cada 3 segundos em primeiro plano; reconexão com espera de até
-  30 segundos. Ao retornar ao app, recarrega o histórico do servidor.
+- Atualização a cada 3 segundos durante execução e 10 segundos em repouso; reconexão
+  com espera de até 30 segundos. Ao retornar ao app, recarrega somente as mensagens
+  recentes e preserva as páginas antigas já abertas.
 - Instaladores de serviço Linux/systemd e macOS/LaunchAgent.
 - Workflow GitHub Actions para testes, APK debug e compilação iOS sem assinatura.
 

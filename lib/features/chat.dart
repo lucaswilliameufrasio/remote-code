@@ -7,6 +7,7 @@ import '../core/models.dart';
 import '../core/store.dart';
 import 'common.dart';
 import 'design.dart';
+import 'question_response.dart';
 import 'tools.dart';
 
 class ChatScreen extends StatefulWidget {
@@ -25,6 +26,11 @@ class ChatScreen extends StatefulWidget {
 }
 
 class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
+  static const int recentMessageLimit = 30;
+  static const int pollMessageLimit = 12;
+  static const int olderMessagePageSize = 30;
+  static const double olderMessageLoadThreshold = 420;
+
   late final OpenCodeApi api;
   late final TextEditingController input;
   late Session session;
@@ -41,13 +47,18 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       inboxError,
       agentSettingsError,
       modelSettingsError;
+  String? olderMessagesCursor, olderMessagesError;
   String status = 'conectando';
   bool fetching = false,
       sending = false,
       paused = false,
       agentsLoading = true,
-      modelsLoading = true;
+      modelsLoading = true,
+      loadingInitialMessages = true,
+      loadingOlderMessages = false,
+      initializedMessageHistory = false;
   bool showLatestButton = false;
+  double previousScrollOffset = 0;
   final Set<String> queueMutations = {};
   int failures = 0, generation = 0;
   int settingsGeneration = 0;
@@ -185,7 +196,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     try {
       final result = await Future.wait<dynamic>([
         api.getSession(session.id),
-        api.messages(session),
+        api.messages(session,
+            limit: initializedMessageHistory
+                ? pollMessageLimit
+                : recentMessageLimit),
         api.statuses(),
         api.pending('permission', session),
         api.pending('question', session),
@@ -194,9 +208,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       if (!mounted || paused || run != generation) return;
       final wasAtLatest = !scroll.hasClients || scroll.position.pixels < 100;
       final inboxResult = result[5] as (List<Json>?, String?);
+      final messagePage = result[1] as MessagePage;
       setState(() {
         session = result[0] as Session;
-        messages = objects(result[1]);
+        messages = _mergeRecentMessages(messages, messagePage.messages);
+        if (!initializedMessageHistory) {
+          olderMessagesCursor = messagePage.cursor;
+          initializedMessageHistory = true;
+        }
+        loadingInitialMessages = false;
         status =
             object(object(result[2])[session.id])['type'] as String? ?? 'idle';
         permissions = objects(result[3]);
@@ -214,15 +234,103 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         setState(() {
           error = e.toString();
           failures++;
+          loadingInitialMessages = false;
         });
       }
     } finally {
       fetching = false;
       if (mounted && !paused) {
         final delay = failures == 0
-            ? 3
+            ? (busy ? 3 : 10)
             : (3 * (1 << failures.clamp(0, 3).toInt())).clamp(3, 30).toInt();
         poll = Timer(Duration(seconds: delay), _refresh);
+      }
+    }
+  }
+
+  List<Json> _mergeRecentMessages(List<Json> existing, List<Json> incoming) {
+    final mergedMessages = existing.toList();
+    final existingIndexes = <String, int>{};
+    for (var index = 0; index < mergedMessages.length; index++) {
+      final messageID = _messageID(mergedMessages[index]);
+      if (messageID != null) {
+        existingIndexes[messageID] = index;
+      }
+    }
+    for (final message in incoming) {
+      final messageID = _messageID(message);
+      final existingIndex =
+          messageID == null ? null : existingIndexes[messageID];
+      if (existingIndex == null) {
+        mergedMessages.add(message);
+        if (messageID != null) {
+          existingIndexes[messageID] = mergedMessages.length - 1;
+        }
+      } else {
+        mergedMessages[existingIndex] = message;
+      }
+    }
+    return mergedMessages;
+  }
+
+  List<Json> _prependOlderMessages(
+      List<Json> existing, List<Json> olderMessages) {
+    final existingIDs = <String>{};
+    for (final message in existing) {
+      final messageID = _messageID(message);
+      if (messageID != null) {
+        existingIDs.add(messageID);
+      }
+    }
+    final combinedMessages = <Json>[];
+    for (final message in olderMessages) {
+      final messageID = _messageID(message);
+      if (messageID != null && existingIDs.contains(messageID)) {
+        continue;
+      }
+      combinedMessages.add(message);
+      if (messageID != null) {
+        existingIDs.add(messageID);
+      }
+    }
+    combinedMessages.addAll(existing);
+    return combinedMessages;
+  }
+
+  String? _messageID(Json message) => object(message['info'])['id'] as String?;
+
+  Future<void> _loadOlderMessages() async {
+    final cursor = olderMessagesCursor;
+    if (cursor == null || loadingOlderMessages || !mounted || paused) {
+      return;
+    }
+    setState(() {
+      loadingOlderMessages = true;
+      olderMessagesError = null;
+    });
+    try {
+      final page = await api.messages(
+        session,
+        limit: olderMessagePageSize,
+        cursor: cursor,
+      );
+      if (!mounted || paused || cursor != olderMessagesCursor) {
+        return;
+      }
+      setState(() {
+        messages = _prependOlderMessages(messages, page.messages);
+        olderMessagesCursor =
+            page.messages.isEmpty || page.cursor == cursor ? null : page.cursor;
+      });
+    } catch (exception) {
+      if (mounted && !paused) {
+        setState(() {
+          olderMessagesError = exception.toString();
+        });
+      }
+    } finally {
+      if (mounted) {
+        setState(() => loadingOlderMessages = false);
       }
     }
   }
@@ -239,9 +347,17 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     if (!scroll.hasClients) {
       return;
     }
-    final shouldShow = scroll.position.pixels > 160;
+    final currentOffset = scroll.position.pixels;
+    final shouldShow = currentOffset > 160;
     if (shouldShow != showLatestButton && mounted) {
       setState(() => showLatestButton = shouldShow);
+    }
+    final movedTowardOlderMessages = currentOffset > previousScrollOffset;
+    previousScrollOffset = currentOffset;
+    final distanceToOlderEdge = scroll.position.maxScrollExtent - currentOffset;
+    if (movedTowardOlderMessages &&
+        distanceToOlderEdge <= olderMessageLoadThreshold) {
+      _loadOlderMessages();
     }
   }
 
@@ -250,6 +366,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       if (!mounted || !scroll.hasClients) {
         return;
       }
+      previousScrollOffset = 0;
       if (animate) {
         scroll.animateTo(
           0,
@@ -565,8 +682,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _answerQuestion(Json request) async {
-    final answers = await showDialog<Json>(
-        context: context, builder: (_) => FormDialog(form: request));
+    final answers = await showModalBottomSheet<Json>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
+      backgroundColor: AppColors.surface,
+      builder: (_) => QuestionResponseSheet(form: request),
+    );
     if (answers != null) {
       await _action(
           () => api.replyForm(session, request['id'] as String, answers));
@@ -765,7 +888,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             if (error != null) _connectionWarning(),
             _pendingRequests(),
             Expanded(
-              child: messages.isEmpty ? _emptyConversation() : _conversation(),
+              child: loadingInitialMessages
+                  ? _loadingConversation()
+                  : messages.isEmpty
+                      ? _emptyConversation()
+                      : _conversation(),
             ),
             if (busy) _executionBar(),
             _composer(),
@@ -847,6 +974,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   Widget _pendingRequests() {
     final pendingMessages = queuedMessages;
+    final pendingCount = permissions.length + questions.length;
     if (permissions.isEmpty &&
         questions.isEmpty &&
         pendingMessages.isEmpty &&
@@ -854,19 +982,52 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       return const SizedBox.shrink();
     }
     return ConstrainedBox(
-      constraints: const BoxConstraints(maxHeight: 230),
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.sizeOf(context).height * .36,
+      ),
       child: ListView(
         shrinkWrap: true,
-        padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
         children: [
+          if (pendingCount > 0)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(4, 2, 4, 8),
+              child: Row(
+                children: [
+                  const Icon(
+                    Icons.notification_important_outlined,
+                    size: 18,
+                    color: AppColors.warning,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'PRECISA DA SUA ATENÇÃO',
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                            color: AppColors.warning,
+                            letterSpacing: 1,
+                            fontWeight: FontWeight.w800,
+                          ),
+                    ),
+                  ),
+                  Text(
+                    '$pendingCount',
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: AppColors.warning,
+                          fontWeight: FontWeight.w700,
+                        ),
+                  ),
+                ],
+              ),
+            ),
           if (inboxError != null)
             InfoBox(
               'Não foi possível consultar a fila: $inboxError',
               icon: Icons.error_outline,
             ),
+          for (final question in questions) _questionCard(question),
           for (final permissionRequest in permissions)
             _permissionCard(permissionRequest),
-          for (final question in questions) _questionCard(question),
           if (pendingMessages.isNotEmpty) ...[
             Padding(
               padding: const EdgeInsets.fromLTRB(4, 8, 4, 0),
@@ -1043,17 +1204,91 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Widget _questionCard(Json question) {
+    final fields = objects(question['fields']);
+    final firstField = fields.isEmpty ? <String, dynamic>{} : fields.first;
+    final formTitle = question['title'] as String?;
+    final questionTitle = firstField['title'] as String?;
+    final description = firstField['description'] as String?;
     return Card(
       color: AppColors.surfaceRaised,
-      child: ListTile(
-        leading: const Icon(
-          Icons.help_outline,
-          color: AppColors.warning,
-        ),
-        title: const Text('O agente precisa de uma resposta'),
-        subtitle: Text(question['title'] as String? ?? 'Formulário pendente'),
-        trailing: const Icon(Icons.arrow_forward, size: 18),
+      shape: RoundedRectangleBorder(
+        borderRadius: smallRadius,
+        side: BorderSide(color: AppColors.warning.withValues(alpha: .4)),
+      ),
+      child: InkWell(
         onTap: () => _answerQuestion(question),
+        borderRadius: smallRadius,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(15, 14, 15, 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(
+                    Icons.help_outline,
+                    color: AppColors.warning,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'PERGUNTA DO AGENTE',
+                          style:
+                              Theme.of(context).textTheme.labelSmall?.copyWith(
+                                    color: AppColors.warning,
+                                    fontWeight: FontWeight.w800,
+                                    letterSpacing: .8,
+                                  ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          formTitle?.trim().isNotEmpty == true
+                              ? formTitle!
+                              : questionTitle ??
+                                  'O agente aguarda sua resposta',
+                          style:
+                              Theme.of(context).textTheme.titleSmall?.copyWith(
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              if (formTitle?.trim().isNotEmpty == true &&
+                  questionTitle?.trim().isNotEmpty == true) ...[
+                const SizedBox(height: 7),
+                Text(
+                  questionTitle!,
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+              ],
+              if (description?.trim().isNotEmpty == true) ...[
+                const SizedBox(height: 4),
+                Text(
+                  description!,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: AppColors.muted,
+                      ),
+                ),
+              ],
+              const SizedBox(height: 10),
+              Align(
+                alignment: Alignment.centerRight,
+                child: FilledButton.tonalIcon(
+                  onPressed: () => _answerQuestion(question),
+                  icon: const Icon(Icons.edit_outlined, size: 18),
+                  label: const Text('Responder agora'),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -1104,6 +1339,23 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       controller: scroll,
       showJumpToLatest: showLatestButton,
       onJumpToLatest: _scrollToLatest,
+      hasOlderMessages: olderMessagesCursor != null,
+      loadingOlderMessages: loadingOlderMessages,
+      olderMessagesError: olderMessagesError,
+      onLoadOlderMessages: _loadOlderMessages,
+    );
+  }
+
+  Widget _loadingConversation() {
+    return const Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          CircularProgressIndicator(),
+          SizedBox(height: 14),
+          Text('Carregando mensagens recentes…'),
+        ],
+      ),
     );
   }
 
@@ -1576,6 +1828,10 @@ class ConversationTimeline extends StatelessWidget {
   final ScrollController controller;
   final bool showJumpToLatest;
   final VoidCallback onJumpToLatest;
+  final bool hasOlderMessages;
+  final bool loadingOlderMessages;
+  final String? olderMessagesError;
+  final VoidCallback? onLoadOlderMessages;
 
   const ConversationTimeline({
     super.key,
@@ -1583,31 +1839,70 @@ class ConversationTimeline extends StatelessWidget {
     required this.controller,
     required this.showJumpToLatest,
     required this.onJumpToLatest,
+    this.hasOlderMessages = false,
+    this.loadingOlderMessages = false,
+    this.olderMessagesError,
+    this.onLoadOlderMessages,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Stack(
+    return Column(
       children: [
-        ListView.builder(
-          reverse: true,
-          controller: controller,
-          padding: const EdgeInsets.fromLTRB(16, 18, 16, 8),
-          itemCount: messages.length,
-          itemBuilder: (_, index) => MessageCard(
-            message: messages[messages.length - 1 - index],
-          ),
-        ),
-        if (showJumpToLatest)
-          Positioned(
-            right: 16,
-            bottom: 14,
-            child: FilledButton.tonalIcon(
-              onPressed: onJumpToLatest,
-              icon: const Icon(Icons.south),
-              label: const Text('Mais recentes'),
+        if (hasOlderMessages ||
+            loadingOlderMessages ||
+            olderMessagesError != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 2),
+            child: Center(
+              child: TextButton.icon(
+                onPressed: loadingOlderMessages ? null : onLoadOlderMessages,
+                icon: loadingOlderMessages
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : Icon(
+                        olderMessagesError == null
+                            ? Icons.history
+                            : Icons.refresh,
+                      ),
+                label: Text(
+                  loadingOlderMessages
+                      ? 'Carregando mensagens antigas…'
+                      : olderMessagesError == null
+                          ? 'Carregar mensagens anteriores'
+                          : 'Falha ao carregar · tentar novamente',
+                ),
+              ),
             ),
           ),
+        Expanded(
+          child: Stack(
+            children: [
+              ListView.builder(
+                reverse: true,
+                controller: controller,
+                padding: const EdgeInsets.fromLTRB(16, 18, 16, 8),
+                itemCount: messages.length,
+                itemBuilder: (_, index) => MessageCard(
+                  message: messages[messages.length - 1 - index],
+                ),
+              ),
+              if (showJumpToLatest)
+                Positioned(
+                  right: 16,
+                  bottom: 14,
+                  child: FilledButton.tonalIcon(
+                    onPressed: onJumpToLatest,
+                    icon: const Icon(Icons.south),
+                    label: const Text('Mais recentes'),
+                  ),
+                ),
+            ],
+          ),
+        ),
       ],
     );
   }

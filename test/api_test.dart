@@ -254,17 +254,73 @@ void main() {
             200);
       }));
 
-      final messages = await api.messages(
+      final messagePage = await api.messages(
           const Session(id: 'ses_one', title: 'One', directory: '/work/a'));
+      final messages = messagePage.messages;
 
       expect(messages, hasLength(2));
       expect(object(messages.first['info'])['role'], 'user');
+      expect(object(messages.first['info'])['id'], 'msg_user');
       final assistantParts = objects(messages.last['parts']);
       expect(assistantParts, hasLength(3));
       expect(assistantParts[0]['type'], 'reasoning');
       expect(assistantParts[0].containsKey('text'), isFalse);
       expect(assistantParts[1]['text'], 'Starting');
       expect(assistantParts[2]['tool'], 'shell');
+      api.close();
+    });
+
+    test('Should request older message pages using opaque cursors', () async {
+      final requests = <http.Request>[];
+      final api = OpenCodeApi(machine, client: MockClient((request) async {
+        requests.add(request);
+        if (request.url.queryParameters.containsKey('cursor')) {
+          return http.Response(
+              jsonEncode({
+                'data': [
+                  {'id': 'msg_old', 'type': 'user', 'text': 'Older'}
+                ],
+                'cursor': {},
+              }),
+              200);
+        }
+        return http.Response(
+            jsonEncode({
+              'data': [
+                {
+                  'id': 'msg_new',
+                  'type': 'assistant',
+                  'content': [
+                    {'type': 'text', 'text': 'Recent'},
+                  ],
+                }
+              ],
+              'cursor': {'next': 'opaque/message-cursor'},
+            }),
+            200);
+      }));
+      const session =
+          Session(id: 'ses_one', title: 'One', directory: '/work/a');
+
+      final recentPage = await api.messages(session, limit: 12);
+      final olderPage = await api.messages(
+        session,
+        limit: 30,
+        cursor: recentPage.cursor,
+      );
+
+      expect(recentPage.messages.single['info'], containsPair('id', 'msg_new'));
+      expect(recentPage.cursor, 'opaque/message-cursor');
+      expect(olderPage.messages.single['info'], containsPair('id', 'msg_old'));
+      expect(olderPage.cursor, isNull);
+      expect(requests.first.url.queryParameters['limit'], '12');
+      expect(requests.first.url.queryParameters['order'], 'desc');
+      expect(requests.last.url.queryParameters['limit'], '30');
+      expect(requests.last.url.queryParameters.containsKey('order'), isFalse);
+      expect(
+        requests.last.url.queryParameters['cursor'],
+        'opaque/message-cursor',
+      );
       api.close();
     });
 

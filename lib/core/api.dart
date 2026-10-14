@@ -156,10 +156,15 @@ class OpenCodeApi {
         'location': {'directory': directory},
       })));
 
-  Future<List<Json>> messages(Session session) async {
-    final raw = await request(
+  Future<MessagePage> messages(Session session,
+      {int limit = 30, String? cursor}) async {
+    final raw = object(await request(
         'GET', '/api/session/${Uri.encodeComponent(session.id)}/message',
-        query: {'limit': 200, 'order': 'desc'});
+        query: {
+          'limit': limit,
+          if (cursor == null) 'order': 'desc',
+          if (cursor != null) 'cursor': cursor,
+        }));
     final normalized = <Json>[];
     for (final message in _dataObjects(raw)) {
       final displayMessage = _normalizeMessage(message);
@@ -167,7 +172,12 @@ class OpenCodeApi {
         normalized.add(displayMessage);
       }
     }
-    return normalized.reversed.toList();
+    final nextCursor = object(raw['cursor'])['next'];
+    if (nextCursor != null && nextCursor is! String) {
+      throw const ApiException(0, 'Cursor de mensagens v2 inválido.');
+    }
+    return MessagePage(normalized.reversed.toList(),
+        cursor: nextCursor as String?);
   }
 
   Json? _normalizeMessage(Json message) {
@@ -224,6 +234,7 @@ class OpenCodeApi {
     return {
       'info': {
         'role': type == 'user' ? 'user' : 'assistant',
+        if (message['id'] is String) 'id': message['id'],
         if (message['error'] != null) 'error': message['error'],
       },
       'parts': parts,

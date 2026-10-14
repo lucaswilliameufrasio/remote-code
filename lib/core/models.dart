@@ -101,6 +101,13 @@ class SessionPage {
   const SessionPage(this.sessions, {this.cursor, this.warning});
 }
 
+class MessagePage {
+  final List<Json> messages;
+  final String? cursor;
+
+  const MessagePage(this.messages, {this.cursor});
+}
+
 /// HTTP is only accepted on a tailnet address or explicit local preview.
 String? validateServerUrl(String value, {bool allowLoopbackHttp = false}) {
   final u = Uri.tryParse(value.trim());
