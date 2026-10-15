@@ -19,10 +19,30 @@ def configure_android(path: pathlib.Path, allow_http: bool):
     manifest = path / 'app/src/main/AndroidManifest.xml'
     tree = ET.parse(manifest)
     root = tree.getroot()
-    for permission in ('android.permission.INTERNET', 'android.permission.USE_BIOMETRIC'):
+    for permission in (
+        'android.permission.INTERNET',
+        'android.permission.USE_BIOMETRIC',
+        'android.permission.RECORD_AUDIO',
+    ):
         if not any(p.get(f'{{{ANDROID}}}name') == permission
                    for p in root.findall('uses-permission')):
             ET.SubElement(root, 'uses-permission', {f'{{{ANDROID}}}name': permission})
+    queries = root.find('queries')
+    if queries is None:
+        queries = ET.SubElement(root, 'queries')
+    recognition_action = 'android.speech.RecognitionService'
+    has_recognition_service = any(
+        action.get(f'{{{ANDROID}}}name') == recognition_action
+        for intent in queries.findall('intent')
+        for action in intent.findall('action')
+    )
+    if not has_recognition_service:
+        intent = ET.SubElement(queries, 'intent')
+        ET.SubElement(
+            intent,
+            'action',
+            {f'{{{ANDROID}}}name': recognition_action},
+        )
     app = root.find('application')
     app.set(f'{{{ANDROID}}}label', 'Remoto')
     app.set(f'{{{ANDROID}}}allowBackup', 'false')
@@ -86,6 +106,8 @@ def configure_ios(path: pathlib.Path, allow_http: bool):
     data['CFBundleDisplayName'] = 'Remoto'
     data['NSLocalNetworkUsageDescription'] = 'Conectar aos teus servidores OpenCode pela rede privada Tailscale.'
     data['NSFaceIDUsageDescription'] = 'Usar Face ID para desbloquear o Remoto.'
+    data['NSMicrophoneUsageDescription'] = 'Usar o microfone para ditar um prompt e revisar o texto antes de enviar.'
+    data['NSSpeechRecognitionUsageDescription'] = 'Transcrever o ditado para texto editável antes de enviar ao OpenCode.'
     # HTTPS is default. Direct tailnet HTTP is a developer opt-in.
     data['NSAppTransportSecurity'] = {'NSAllowsArbitraryLoads': allow_http}
     with info.open('wb') as stream:

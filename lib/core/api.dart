@@ -11,6 +11,8 @@ class ApiException implements Exception {
   String toString() => message;
 }
 
+typedef OpenCodeApiFactory = OpenCodeApi Function(Machine machine);
+
 class OpenCodeApi {
   final Machine machine;
   final http.Client client;
@@ -109,12 +111,18 @@ class OpenCodeApi {
     return {'healthy': true, 'version': version};
   }
 
-  Future<List<Json>> projects() async {
+  Future<List<OpenCodeProject>> projects() async {
     final response = await request('GET', '/api/project');
     if (response is! List) {
       throw const ApiException(0, 'Resposta v2 incompatível: projetos.');
     }
-    return objects(response);
+    final projects = <OpenCodeProject>[];
+    for (final project in objects(response)) {
+      if (project['id'] is String && (project['id'] as String).isNotEmpty) {
+        projects.add(OpenCodeProject.fromJson(project));
+      }
+    }
+    return projects;
   }
 
   Future<List<Session>> listDirectory(String directory,
@@ -128,9 +136,13 @@ class OpenCodeApi {
     return _dataObjects(raw).map(Session.fromJson).toList();
   }
 
-  Future<SessionPage> listAll({String search = '', String? cursor}) async {
+  Future<SessionPage> listAll({
+    String search = '',
+    String? cursor,
+    int limit = 100,
+  }) async {
     final query = <String, dynamic>{
-      'limit': 100,
+      'limit': limit,
       if (search.isNotEmpty) 'search': search,
       if (cursor == null) 'order': 'desc' else 'cursor': cursor,
     };
@@ -330,6 +342,37 @@ class OpenCodeApi {
     final requests = _dataObjects(await request(
         'GET', '/api/session/${Uri.encodeComponent(session.id)}/$resource'));
     if (resource == 'form') {
+      return requests;
+    }
+    return requests
+        .map((permission) => {
+              ...permission,
+              'permission': permission['action'],
+              'patterns': permission['resources'] ?? const <String>[],
+            })
+        .toList();
+  }
+
+  Future<List<Json>> pendingForLocation(
+    String kind, {
+    String? directory,
+  }) async {
+    final resource = switch (kind) {
+      'question' => 'form',
+      'permission' => 'permission/request',
+      _ => throw const ApiException(0, 'Tipo de solicitação v2 desconhecido.'),
+    };
+    final requests = _dataObjects(
+      await request(
+        'GET',
+        '/api/$resource',
+        query: {
+          if (directory != null && directory.isNotEmpty)
+            'location[directory]': directory,
+        },
+      ),
+    );
+    if (kind == 'question') {
       return requests;
     }
     return requests

@@ -10,6 +10,15 @@ celular. O nome comercial é provisório; o projeto técnico se chama `remote_de
 - HTTP Basic Auth, senha e dados locais no Android Keystore/iOS Keychain.
 - API HTTP OpenCode v2: sessões globais paginadas com busca por cursor opaco.
 - Listagem por diretório, cadastro de caminhos e abertura direta pelo ID.
+- Tela **Trabalho** combina atalhos locais com as 10 sessões globais mais
+  recentes de cada máquina; atualiza ao reabrir a aba ou puxar para atualizar.
+- Aba de projetos organizada por máquina, usando projeto/worktree do OpenCode e
+  diretório como alternativa; tocar abre as sessões filtradas do diretório.
+- Inbox global de perguntas e permissões pendentes. A verificação é sob demanda,
+  sem polling em segundo plano; consulta localizações conhecidas via API v2 e
+  considera até 100 sessões recentes por máquina, 100 atalhos e 20 sessões ativas
+  por atualização. Diretórios desconhecidos podem não aparecer até serem
+  descobertos pelo servidor ou cadastrados no app.
 - Chat com 30 mensagens recentes no primeiro carregamento e histórico paginado por
   cursor ao rolar para mensagens antigas; atualizações recentes preservam o histórico
   carregado, com Markdown e ações de ferramenta recolhidas.
@@ -21,6 +30,9 @@ celular. O nome comercial é provisório; o projeto técnico se chama `remote_de
   Conectar/desconectar MCPs altera o estado em runtime até reiniciar o OpenCode.
 - Aprovação de permissões uma vez, sempre ou negar; perguntas pendentes em destaque,
   com respostas por opção ou texto próprio e navegação entre perguntas.
+- Ditado curto no compositor: a transcrição fica editável no rascunho e não é
+  enviada até tocar no botão normal de envio. O serviço de reconhecimento do
+  dispositivo pode usar rede; o Remoto não envia a gravação ao OpenCode.
 - Até 100 atalhos recentes de sessões, identificados por máquina + ID, com
   diretório e rascunho persistentes.
 - Onboarding inicial com bloqueio local opcional por senha, biometria do
@@ -36,6 +48,11 @@ celular. O nome comercial é provisório; o projeto técnico se chama `remote_de
 Migração para a API OpenCode v2 implementada com testes de contrato HTTP. Ainda
 falta validar a integração com um servidor v2 real; consulte `VALIDACAO.md` para
 os testes e builds executados nesta entrega.
+
+O Remoto continua sendo um cliente OpenCode v2; não integra Claude Code. Para
+Claude Code no celular, use o Remote Control oficial no app ou navegador da
+Anthropic. Uma integração embutida exigiria um adaptador de agente no host e
+contratos separados de autenticação e permissões.
 
 Os diretórios nativos `android/` e `ios/` são gerados por `scripts/bootstrap.py`
 usando teu SDK Flutter, evitando um scaffold nativo manual incompleto. O script

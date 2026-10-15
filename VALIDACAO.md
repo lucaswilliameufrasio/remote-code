@@ -3,16 +3,17 @@
 ## Executado
 
 - `make validate` — formatação sem diferenças, `flutter analyze --no-fatal-infos`
-  sem issues, 28 testes Flutter/Dart e 7 testes de configuração Android/iOS.
-- `make build-check ios-preview-build` — APK Android debug, iOS Release sem
-  assinatura e iOS Simulator debug compilados.
+  sem issues, 57 testes Flutter/Dart e 8 testes de configuração Android/iOS.
+- `make build-check` — APK Android debug e iOS Release sem assinatura compilados.
+- `make test-ios-simulator` — fluxo de onboarding passou no simulador iOS.
 
 O APK release atual está assinado com a chave debug pela configuração Gradle do
 scaffold. Não o distribua; configure a assinatura release antes de publicar.
 
 Os testes HTTP usam `MockClient`; nenhum servidor OpenCode ou endpoint externo é
-chamado pela suíte automatizada. Foram adicionados contratos para fila, permissões,
-MCPs e skills, além de testes de busca, linha do tempo e tela de ferramentas.
+chamado pela suíte automatizada. Há cobertura para paginação global, sessões criadas
+fora do app na tela **Trabalho**, consulta de pendências por localização, permissões,
+MCPs e skills.
 
 O build iOS ainda avisa que `flutter_secure_storage` não oferece suporte ao Swift
 Package Manager; o Flutter informa que isso poderá virar erro numa versão futura.
@@ -23,11 +24,10 @@ Package Manager; o Flutter informa que isso poderá virar erro numa versão futu
 - Validar contra um servidor OpenCode v2 real: lista e substituição/cancelamento de
   itens pendentes, permissões persistentes, estado e conexão de MCPs e ativação de
   skills.
-- Inspeção visual/interação no simulador iOS: o build foi gerado, mas o backend de
-  entrada `serve-sim` falhou ao iniciar por falta do pacote pinned; captura de tela
-  funciona, porém toques/acessibilidade não ficaram disponíveis.
-- Confirmar listagem global paginada, filtro por diretório e abertura de sessão
-  existente pelo ID; testar também seleção de agentes/modelos no servidor real.
+- Confirmar no servidor OpenCode v2 real que uma sessão recém-criada no computador
+  aparece em **Trabalho**, e testar pendências pelos endpoints de localização,
+  paginação global, filtro por diretório, abertura por ID e seleção de agentes/modelos.
+- O teste de simulador cobre onboarding, não a inspeção visual completa nem fala real.
 - Repetir os fluxos em dispositivos Android e iOS. O artefato iOS desta validação
   não está assinado e não é instalável diretamente em um iPhone.
 
@@ -45,6 +45,14 @@ Package Manager; o Flutter informa que isso poderá virar erro numa versão futu
 9. Desligar a VPN, escrever um rascunho e reativá-la para conferir reconexão.
 10. Reiniciar o PC e o app; conferir histórico, máquinas, atalhos e rascunhos.
 11. Repetir em Android e iPhone; no iPhone validar assinatura e Keychain.
+12. Abrir **Pendências**, conferir perguntas/permissões de sessões salvas e ativas,
+    atualizar a lista e abrir cada item na sessão correspondente.
+13. Abrir **Projetos**, confirmar agrupamento por máquina e abrir as sessões do
+    diretório escolhido.
+14. Ditar uma mensagem em Android/iOS, revisar/editar a transcrição, cancelar um
+    ditado e confirmar que nada é enviado sem tocar no envio normal.
+15. Criar uma sessão pelo terminal do computador e conferir se aparece em
+    **Trabalho** ao reabrir a aba ou puxar para atualizar.
 
 Uma ferramenta interrompida por reboot não continua automaticamente. A retomada
 valida o histórico da sessão e uma nova continuação enviada pelo usuário.

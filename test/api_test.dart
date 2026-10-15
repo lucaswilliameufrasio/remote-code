@@ -93,7 +93,11 @@ void main() {
         }
         return http.Response(
             jsonEncode([
-              {'id': 'prj_one', 'worktree': '/work/a'}
+              {
+                'id': 'prj_one',
+                'canonical': '/work/a',
+                'name': 'Project One',
+              }
             ]),
             200);
       }));
@@ -102,7 +106,9 @@ void main() {
       final projects = await api.projects();
 
       expect(health, {'healthy': true, 'version': '2.0.0'});
-      expect(projects.single['id'], 'prj_one');
+      expect(projects.single.id, 'prj_one');
+      expect(projects.single.worktree, '/work/a');
+      expect(projects.single.name, 'Project One');
       expect(requests.map((request) => request.url.path),
           ['/api/info', '/api/project']);
       api.close();
@@ -446,6 +452,73 @@ void main() {
         'answer': {'plan': 'A'}
       });
       expect(requests[4].url.path, '/api/session/ses_one/form/form_one/reply');
+      api.close();
+    });
+
+    test('Should list pending forms and permissions for a location', () async {
+      final requests = <http.Request>[];
+      final api = OpenCodeApi(machine, client: MockClient((request) async {
+        requests.add(request);
+        if (request.url.path == '/api/form') {
+          return http.Response(
+            jsonEncode({
+              'location': {'directory': '/work/a'},
+              'data': [
+                {
+                  'id': 'form_pending',
+                  'sessionID': 'ses_one',
+                  'title': 'Select an environment',
+                  'fields': [],
+                },
+              ],
+            }),
+            200,
+          );
+        }
+        return http.Response(
+          jsonEncode({
+            'location': {'directory': '/work/a'},
+            'data': [
+              {
+                'id': 'perm_pending',
+                'sessionID': 'ses_two',
+                'action': 'shell',
+                'resources': ['git status'],
+              },
+            ],
+          }),
+          200,
+        );
+      }));
+
+      final forms = await api.pendingForLocation(
+        'question',
+        directory: '/work/a',
+      );
+      final permissions = await api.pendingForLocation(
+        'permission',
+        directory: '/work/a',
+      );
+      await api.pendingForLocation('question');
+
+      expect(forms.single['sessionID'], 'ses_one');
+      expect(permissions.single['sessionID'], 'ses_two');
+      expect(permissions.single['permission'], 'shell');
+      expect(permissions.single['patterns'], ['git status']);
+      expect(requests.map((request) => request.url.path), [
+        '/api/form',
+        '/api/permission/request',
+        '/api/form',
+      ]);
+      expect(
+        requests.take(2).every(
+              (request) =>
+                  request.url.queryParameters['location[directory]'] ==
+                  '/work/a',
+            ),
+        isTrue,
+      );
+      expect(requests.last.url.queryParameters, isEmpty);
       api.close();
     });
 

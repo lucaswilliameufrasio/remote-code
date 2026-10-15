@@ -9,18 +9,21 @@ import 'common.dart';
 import 'design.dart';
 import 'question_response.dart';
 import 'tools.dart';
+import 'voice_prompt.dart';
 
 class ChatScreen extends StatefulWidget {
   final AppStore store;
   final Machine machine;
   final Session session;
   final OpenCodeApi? apiOverride;
+  final VoiceRecognizer Function() voiceRecognizerFactory;
   const ChatScreen(
       {super.key,
       required this.store,
       required this.machine,
       required this.session,
-      this.apiOverride});
+      this.apiOverride,
+      this.voiceRecognizerFactory = PlatformVoiceRecognizer.new});
   @override
   State<ChatScreen> createState() => _ChatScreenState();
 }
@@ -158,6 +161,25 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     } catch (e) {
       if (mounted) notice(context, 'Falha ao salvar rascunho: $e');
     }
+  }
+
+  Future<void> _openVoicePrompt() async {
+    final transcript = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (_) => VoicePromptSheet(
+        recognizerFactory: widget.voiceRecognizerFactory,
+      ),
+    );
+    if (!mounted || transcript == null || transcript.trim().isEmpty) {
+      return;
+    }
+    input.value = insertDictation(input.value, transcript);
   }
 
   @override
@@ -1437,6 +1459,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                     ),
                   ),
                   const SizedBox(width: 9),
+                  IconButton.filledTonal(
+                    tooltip: 'Ditar mensagem',
+                    onPressed: _openVoicePrompt,
+                    icon: const Icon(Icons.mic_none),
+                  ),
+                  const SizedBox(width: 6),
                   IconButton.filled(
                     tooltip: busy ? 'Enfileirar mensagem' : 'Enviar mensagem',
                     onPressed:

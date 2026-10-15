@@ -46,13 +46,14 @@ class Machine {
 class Session {
   final String id, title, directory;
   final int updated;
-  final String? parentID;
+  final String? parentID, projectID;
   const Session(
       {required this.id,
       required this.title,
       required this.directory,
       this.updated = 0,
-      this.parentID});
+      this.parentID,
+      this.projectID});
   factory Session.fromJson(Json j) => Session(
       id: j['id'] as String,
       title: (j['title'] as String?) ?? 'Sessão sem título',
@@ -60,14 +61,29 @@ class Session {
           (j['directory'] as String?) ??
           '',
       updated: (object(j['time'])['updated'] as num?)?.toInt() ?? 0,
-      parentID: j['parentID'] as String?);
+      parentID: j['parentID'] as String?,
+      projectID: j['projectID'] as String?);
   Json toJson() => {
         'id': id,
         'title': title,
         'directory': directory,
         'time': {'updated': updated},
-        'parentID': parentID
+        'parentID': parentID,
+        if (projectID != null) 'projectID': projectID,
       };
+}
+
+class OpenCodeProject {
+  final String id;
+  final String? worktree, name;
+
+  const OpenCodeProject({required this.id, this.worktree, this.name});
+
+  factory OpenCodeProject.fromJson(Json json) => OpenCodeProject(
+        id: json['id'] as String,
+        worktree: (json['canonical'] ?? json['worktree']) as String?,
+        name: json['name'] as String?,
+      );
 }
 
 class Bookmark {

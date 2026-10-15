@@ -53,7 +53,15 @@ class MainActivity : FlutterActivity()''')
         bootstrap.configure_android(self.android, False)
         root = self.manifest()
         names = [v.get(f'{{{bootstrap.ANDROID}}}name') for v in root.findall('uses-permission')]
-        self.assertEqual(names, ['android.permission.INTERNET', 'android.permission.USE_BIOMETRIC'])
+        self.assertEqual(names, [
+            'android.permission.INTERNET',
+            'android.permission.USE_BIOMETRIC',
+            'android.permission.RECORD_AUDIO',
+        ])
+        self.assertEqual(
+            root.find('queries/intent/action').get(f'{{{bootstrap.ANDROID}}}name'),
+            'android.speech.RecognitionService',
+        )
         self.assertEqual(root.find('application').get(f'{{{bootstrap.ANDROID}}}usesCleartextTraffic'), 'false')
         self.assertEqual(root.find('application').get(f'{{{bootstrap.ANDROID}}}allowBackup'), 'false')
         self.assertIn('minSdk = 24', self.gradle.read_text())
@@ -64,8 +72,9 @@ class MainActivity : FlutterActivity()''')
     def test_repeated_configuration_does_not_duplicate_permission(self):
         bootstrap.configure_android(self.android, False)
         bootstrap.configure_android(self.android, False)
-        self.assertEqual(len(self.manifest().findall('uses-permission')), 2)
+        self.assertEqual(len(self.manifest().findall('uses-permission')), 3)
         self.assertEqual(len(self.manifest().findall('application/activity')), 1)
+        self.assertEqual(len(self.manifest().findall('queries/intent')), 1)
         styles = (self.android / 'app/src/main/res/values/styles.xml').read_text()
         self.assertEqual(styles.count('Theme.AppCompat.DayNight.NoActionBar'), 2)
     def test_android_http_opt_in(self):
@@ -79,6 +88,14 @@ class MainActivity : FlutterActivity()''')
         self.assertEqual(info['OtherSetting'], 'preserve')
         self.assertEqual(info['CFBundleDisplayName'], 'Remoto')
         self.assertEqual(info['NSFaceIDUsageDescription'], 'Usar Face ID para desbloquear o Remoto.')
+        self.assertEqual(
+            info['NSMicrophoneUsageDescription'],
+            'Usar o microfone para ditar um prompt e revisar o texto antes de enviar.',
+        )
+        self.assertEqual(
+            info['NSSpeechRecognitionUsageDescription'],
+            'Transcrever o ditado para texto editável antes de enviar ao OpenCode.',
+        )
         with (self.ios / 'Runner/Runner.entitlements').open('rb') as stream:
             self.assertEqual(plistlib.load(stream)['keychain-access-groups'], [])
         self.assertIn('CODE_SIGN_ENTITLEMENTS = Runner/Runner.entitlements;',

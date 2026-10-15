@@ -11,6 +11,7 @@ import 'package:remote_dev/core/models.dart';
 import 'package:remote_dev/core/store.dart';
 import 'package:remote_dev/features/chat.dart';
 import 'package:remote_dev/features/question_response.dart';
+import 'package:remote_dev/features/voice_prompt.dart';
 
 const testMachine = Machine(
   id: 'desktop',
@@ -569,4 +570,124 @@ void main() {
     expect(didJumpToLatest, isTrue);
     controller.dispose();
   });
+
+  testWidgets('Should insert reviewed dictation without submitting it',
+      (tester) async {
+    final requests = <http.Request>[];
+    final recognizer = _ChatTestVoiceRecognizer();
+    final store = await createTestStore();
+    await store.remember(
+      testMachine,
+      testSession,
+      draft: 'Review this patch',
+    );
+    final api = OpenCodeApi(
+      testMachine,
+      client: MockClient((request) async {
+        requests.add(request);
+        final path = request.url.path;
+        if (path == '/api/session/ses_test') {
+          return http.Response(
+            jsonEncode({
+              'data': {
+                'id': testSession.id,
+                'title': testSession.title,
+                'location': {'directory': testSession.directory},
+              },
+            }),
+            200,
+          );
+        }
+        if (path == '/api/session/ses_test/message') {
+          return http.Response(
+            jsonEncode({'data': [], 'cursor': {}}),
+            200,
+          );
+        }
+        if (path == '/api/session/active' ||
+            path == '/api/session/ses_test/permission' ||
+            path == '/api/session/ses_test/form' ||
+            path == '/api/session/ses_test/inbox' ||
+            path == '/api/agent' ||
+            path == '/api/provider' ||
+            path == '/api/model') {
+          return http.Response(
+            jsonEncode({'data': path == '/api/session/active' ? {} : []}),
+            200,
+          );
+        }
+        return http.Response('Unexpected route', 404);
+      }),
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ChatScreen(
+          store: store,
+          machine: testMachine,
+          session: testSession,
+          apiOverride: api,
+          voiceRecognizerFactory: () => recognizer,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Ditar mensagem'));
+    await tester.pumpAndSettle();
+    expect(recognizer.initializeCalls, 0);
+    await tester.tap(find.text('Começar a ditar'));
+    await tester.pumpAndSettle();
+    recognizer.emit('and add regression coverage', true);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Inserir no rascunho'));
+    await tester.pumpAndSettle();
+
+    final composer = tester.widget<TextField>(find.byType(TextField));
+    expect(
+      composer.controller?.text,
+      'Review this patch and add regression coverage',
+    );
+    expect(
+      requests.where((request) => request.url.path.endsWith('/prompt')),
+      isEmpty,
+    );
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+}
+
+class _ChatTestVoiceRecognizer implements VoiceRecognizer {
+  ValueChanged<String>? statusListener;
+  void Function(String transcript, bool isFinal)? resultListener;
+  int initializeCalls = 0;
+
+  @override
+  Future<bool> initialize({
+    required ValueChanged<String> onStatus,
+    required ValueChanged<String> onError,
+  }) async {
+    initializeCalls++;
+    statusListener = onStatus;
+    return true;
+  }
+
+  @override
+  Future<void> listen({
+    required void Function(String transcript, bool isFinal) onResult,
+  }) async {
+    resultListener = onResult;
+    statusListener?.call('listening');
+  }
+
+  @override
+  Future<void> stop() async {
+    statusListener?.call('done');
+  }
+
+  @override
+  Future<void> cancel() async {}
+
+  void emit(String transcript, bool isFinal) {
+    resultListener?.call(transcript, isFinal);
+  }
 }

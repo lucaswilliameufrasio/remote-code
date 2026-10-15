@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 import '../core/api.dart';
+import '../core/concurrency.dart';
 import '../core/models.dart';
 import '../core/store.dart';
 import 'chat.dart';
 import 'common.dart';
 import 'design.dart';
+import 'pending_inbox.dart';
+import 'projects.dart';
 import 'sessions.dart';
 
 const allowTailnetHttp = bool.fromEnvironment('ALLOW_TAILNET_HTTP');
@@ -12,23 +15,45 @@ const allowLocalServerHttp = bool.fromEnvironment('ALLOW_LOCAL_SERVER_HTTP');
 
 class HomeScreen extends StatefulWidget {
   final AppStore store;
-  const HomeScreen({super.key, required this.store});
+  final OpenCodeApiFactory apiFactory;
+
+  const HomeScreen({
+    super.key,
+    required this.store,
+    this.apiFactory = OpenCodeApi.new,
+  });
   @override
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-enum HomeDestination { activity, machines }
+enum HomeDestination { activity, inbox, projects, machines }
 
 class _HomeScreenState extends State<HomeScreen> {
+  static const int recentSessionsPerMachine = 10;
+  static const int sessionQueryConcurrency = 3;
+
   final Map<String, String> _health = {};
   bool _checking = false;
+  bool _loadingRecentSessions = false;
+  Map<String, List<Session>> _serverRecentSessions = {};
+  List<String> _recentSessionErrors = [];
   HomeDestination _destination = HomeDestination.activity;
+  final Set<HomeDestination> _visitedDestinations = {
+    HomeDestination.activity,
+    HomeDestination.machines,
+  };
+  int _pendingActionCount = 0;
+  final GlobalKey<PendingInboxScreenState> _pendingInboxKey =
+      GlobalKey<PendingInboxScreenState>();
+  final GlobalKey<ProjectsScreenState> _projectsKey =
+      GlobalKey<ProjectsScreenState>();
   AppStore get store => widget.store;
   @override
   void initState() {
     super.initState();
     store.addListener(_changed);
     _check();
+    _loadRecentSessions();
   }
 
   void _changed() {
@@ -57,7 +82,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _checkMachine(Machine machine) async {
-    final api = OpenCodeApi(machine);
+    final api = widget.apiFactory(machine);
     try {
       final health = await api.health();
       _health[machine.id] = health['healthy'] == true
@@ -76,7 +101,7 @@ class _HomeScreenState extends State<HomeScreen> {
         MaterialPageRoute(
             builder: (_) => MachineEditor(store: store, machine: machine)));
     if (saved == true && mounted) {
-      _check();
+      await Future.wait<void>([_check(), _loadRecentSessions()]);
     }
   }
 
@@ -88,8 +113,172 @@ class _HomeScreenState extends State<HomeScreen> {
     await Navigator.push(
         context,
         MaterialPageRoute(
-            builder: (_) =>
-                ChatScreen(store: store, machine: m, session: b.session)));
+            builder: (_) => ChatScreen(
+                  store: store,
+                  machine: m,
+                  session: b.session,
+                  apiOverride: widget.apiFactory(m),
+                )));
+    if (mounted) {
+      await _loadRecentSessions();
+    }
+  }
+
+  Future<void> _loadRecentSessions() async {
+    if (_loadingRecentSessions) {
+      return;
+    }
+    setState(() {
+      _loadingRecentSessions = true;
+      _recentSessionErrors = [];
+    });
+
+    final results = await mapConcurrent<Machine, _RecentSessionsResult>(
+      items: store.machines,
+      concurrency: sessionQueryConcurrency,
+      operation: _loadMachineRecentSessions,
+    );
+    if (!mounted) {
+      return;
+    }
+
+    final sessionsByMachine = <String, List<Session>>{};
+    final errors = <String>[];
+    for (final result in results) {
+      if (result.error != null) {
+        final previousSessions = _serverRecentSessions[result.machine.id];
+        if (previousSessions != null) {
+          sessionsByMachine[result.machine.id] = previousSessions;
+        }
+        errors.add('${result.machine.name}: ${result.error}');
+        continue;
+      }
+      sessionsByMachine[result.machine.id] = result.sessions;
+    }
+
+    setState(() {
+      _serverRecentSessions = sessionsByMachine;
+      _recentSessionErrors = errors;
+      _loadingRecentSessions = false;
+    });
+  }
+
+  Future<_RecentSessionsResult> _loadMachineRecentSessions(
+    Machine machine,
+  ) async {
+    final api = widget.apiFactory(machine);
+    try {
+      final page = await api.listAll(limit: recentSessionsPerMachine);
+      return _RecentSessionsResult(machine, page.sessions);
+    } catch (exception) {
+      return _RecentSessionsResult(
+        machine,
+        const [],
+        error: exception.toString(),
+      );
+    } finally {
+      api.close();
+    }
+  }
+
+  Future<void> _refreshActivity() async {
+    await Future.wait<void>([_check(), _loadRecentSessions()]);
+  }
+
+  List<Bookmark> _activitySessions() {
+    final sessionsByKey = <String, Bookmark>{
+      for (final bookmark in store.bookmarks) bookmark.key: bookmark,
+    };
+    for (final machine in store.machines) {
+      final sessions = _serverRecentSessions[machine.id] ?? const <Session>[];
+      for (final session in sessions) {
+        final key = '${machine.id}:${session.id}';
+        final bookmark = sessionsByKey[key];
+        if (bookmark == null) {
+          sessionsByKey[key] = Bookmark(
+            machineID: machine.id,
+            session: session,
+            opened: session.updated,
+          );
+          continue;
+        }
+        final opened = bookmark.opened > session.updated
+            ? bookmark.opened
+            : session.updated;
+        sessionsByKey[key] = Bookmark(
+          machineID: machine.id,
+          session: session,
+          opened: opened,
+          draft: bookmark.draft,
+        );
+      }
+    }
+
+    final activitySessions = sessionsByKey.values.toList();
+    activitySessions.sort((first, second) {
+      final openedComparison = second.opened.compareTo(first.opened);
+      if (openedComparison != 0) {
+        return openedComparison;
+      }
+      final machineComparison = first.machineID.compareTo(second.machineID);
+      if (machineComparison != 0) {
+        return machineComparison;
+      }
+      return first.session.id.compareTo(second.session.id);
+    });
+    return activitySessions;
+  }
+
+  Future<void> _openProject(ProjectTarget project) async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => SessionsScreen(
+          store: store,
+          machine: project.machine,
+          initialDirectory: project.directory,
+          apiFactory: widget.apiFactory,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openPendingAction(PendingAction action) async {
+    await store.remember(action.machine, action.session);
+    if (!mounted) {
+      return;
+    }
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ChatScreen(
+          store: store,
+          machine: action.machine,
+          session: action.session,
+          apiOverride: widget.apiFactory(action.machine),
+        ),
+      ),
+    );
+  }
+
+  void _updatePendingActionCount(int count) {
+    if (mounted && count != _pendingActionCount) {
+      setState(() => _pendingActionCount = count);
+    }
+  }
+
+  void _selectDestination(HomeDestination destination) {
+    final wasAlreadyVisited = _visitedDestinations.contains(destination);
+    setState(() {
+      _destination = destination;
+      _visitedDestinations.add(destination);
+    });
+    if (destination == HomeDestination.inbox && wasAlreadyVisited) {
+      _pendingInboxKey.currentState?.refresh();
+    }
+    if (destination == HomeDestination.activity && wasAlreadyVisited) {
+      _loadRecentSessions();
+    }
   }
 
   @override
@@ -149,20 +338,56 @@ class _HomeScreenState extends State<HomeScreen> {
           index: _destination.index,
           children: [
             _activity(onlineCount),
+            if (_visitedDestinations.contains(HomeDestination.inbox))
+              PendingInboxScreen(
+                key: _pendingInboxKey,
+                store: store,
+                apiFactory: widget.apiFactory,
+                onOpenAction: _openPendingAction,
+                onCountChanged: _updatePendingActionCount,
+              )
+            else
+              const SizedBox.shrink(),
+            if (_visitedDestinations.contains(HomeDestination.projects))
+              ProjectsScreen(
+                key: _projectsKey,
+                store: store,
+                apiFactory: widget.apiFactory,
+                onOpenProject: _openProject,
+              )
+            else
+              const SizedBox.shrink(),
             _machines(onlineCount),
           ],
         ),
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _destination.index,
-        onDestinationSelected: (index) {
-          setState(() => _destination = HomeDestination.values[index]);
-        },
-        destinations: const [
+        onDestinationSelected: (index) =>
+            _selectDestination(HomeDestination.values[index]),
+        destinations: [
           NavigationDestination(
             icon: Icon(Icons.work_outline),
             selectedIcon: Icon(Icons.work),
             label: 'Trabalho',
+          ),
+          NavigationDestination(
+            icon: Badge(
+              label: Text(_pendingActionCount.toString()),
+              isLabelVisible: _pendingActionCount > 0,
+              child: const Icon(Icons.notifications_outlined),
+            ),
+            selectedIcon: Badge(
+              label: Text(_pendingActionCount.toString()),
+              isLabelVisible: _pendingActionCount > 0,
+              child: const Icon(Icons.notifications),
+            ),
+            label: 'Pendências',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.folder_outlined),
+            selectedIcon: Icon(Icons.folder),
+            label: 'Projetos',
           ),
           NavigationDestination(
             icon: Icon(Icons.dns_outlined),
@@ -183,8 +408,9 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _activity(int onlineCount) {
+    final activitySessions = _activitySessions();
     return RefreshIndicator(
-      onRefresh: _check,
+      onRefresh: _refreshActivity,
       child: ListView(
         padding: const EdgeInsets.fromLTRB(22, 18, 22, 32),
         children: [
@@ -222,7 +448,14 @@ class _HomeScreenState extends State<HomeScreen> {
             const SizedBox(height: 16),
             InfoBox(store.error!, icon: Icons.error_outline),
           ],
-          if (_checking) ...[
+          if (_recentSessionErrors.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            for (final sessionError in _recentSessionErrors) ...[
+              InfoBox(sessionError, icon: Icons.cloud_off),
+              const SizedBox(height: 8),
+            ],
+          ],
+          if (_checking || _loadingRecentSessions) ...[
             const SizedBox(height: 18),
             const LinearProgressIndicator(),
           ],
@@ -232,7 +465,7 @@ class _HomeScreenState extends State<HomeScreen> {
               eyebrow('Retomar trabalho', color: AppColors.accent),
               const Spacer(),
               Text(
-                '${store.bookmarks.length} recentes',
+                '${activitySessions.length} recentes',
                 style: Theme.of(context).textTheme.labelMedium?.copyWith(
                       color: AppColors.muted,
                     ),
@@ -240,12 +473,12 @@ class _HomeScreenState extends State<HomeScreen> {
             ],
           ),
           const SizedBox(height: 13),
-          if (store.bookmarks.isEmpty) _emptyActivity(),
-          for (final bookmark in store.bookmarks) ...[
+          if (activitySessions.isEmpty) _emptyActivity(),
+          for (final bookmark in activitySessions) ...[
             _bookmarkCard(bookmark),
             const SizedBox(height: 10),
           ],
-          if (store.bookmarks.isNotEmpty) ...[
+          if (activitySessions.isNotEmpty) ...[
             const SizedBox(height: 20),
             _browseMachinesCard(),
           ],
@@ -286,7 +519,7 @@ class _HomeScreenState extends State<HomeScreen> {
             const SizedBox(height: 7),
             Text(
               hasMachines
-                  ? 'As sessões que você abrir vão aparecer aqui para retomar com um toque.'
+                  ? 'As sessões recentes das máquinas aparecerão aqui. Abrir uma também a salva como atalho no celular.'
                   : 'Adicione seu Mac, PC ou servidor para acessar as sessões do OpenCode.',
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                     color: AppColors.muted,
@@ -536,6 +769,18 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
   }
+}
+
+class _RecentSessionsResult {
+  final Machine machine;
+  final List<Session> sessions;
+  final String? error;
+
+  const _RecentSessionsResult(
+    this.machine,
+    this.sessions, {
+    this.error,
+  });
 }
 
 class MachineEditor extends StatefulWidget {

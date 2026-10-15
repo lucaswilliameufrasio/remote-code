@@ -10,7 +10,16 @@ import 'design.dart';
 class SessionsScreen extends StatefulWidget {
   final AppStore store;
   final Machine machine;
-  const SessionsScreen({super.key, required this.store, required this.machine});
+  final String? initialDirectory;
+  final OpenCodeApiFactory apiFactory;
+
+  const SessionsScreen({
+    super.key,
+    required this.store,
+    required this.machine,
+    this.initialDirectory,
+    this.apiFactory = OpenCodeApi.new,
+  });
   @override
   State<SessionsScreen> createState() => _SessionsScreenState();
 }
@@ -27,7 +36,8 @@ class _SessionsScreenState extends State<SessionsScreen> {
   @override
   void initState() {
     super.initState();
-    api = OpenCodeApi(widget.machine);
+    api = widget.apiFactory(widget.machine);
+    directory = widget.initialDirectory;
     _load();
   }
 
