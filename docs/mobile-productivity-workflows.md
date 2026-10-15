@@ -14,7 +14,10 @@ phone requires typing.
 - The **Trabalho** destination combines locally saved shortcuts with the ten
   newest global sessions from each configured machine. Refresh on entry and
   pull-to-refresh; opening a server-only session then saves it as a local
-  shortcut. Keep the bookmark limit and draft persistence unchanged.
+  shortcut. Each machine with a next-page cursor offers a button to load ten more
+  sessions, merging by session ID without duplicates. A failed page preserves
+  existing results and its cursor for retry; a successful refresh resets to the
+  newest ten. Keep the bookmark limit and draft persistence unchanged.
 - Add a global pending-actions destination. Load it when first opened, when
   revisited, or manually refreshed; do not add background polling or push
   delivery. Use the v2 location-scoped pending-form and permission-request

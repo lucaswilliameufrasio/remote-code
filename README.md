@@ -12,6 +12,8 @@ celular. O nome comercial é provisório; o projeto técnico se chama `remote_de
 - Listagem por diretório, cadastro de caminhos e abertura direta pelo ID.
 - Tela **Trabalho** combina atalhos locais com as 10 sessões globais mais
   recentes de cada máquina; atualiza ao reabrir a aba ou puxar para atualizar.
+  O botão **Carregar mais 10 sessões** busca a próxima página da máquina indicada
+  sem repetir sessões; desaparece quando não há mais páginas.
 - Aba de projetos organizada por máquina, usando projeto/worktree do OpenCode e
   diretório como alternativa; tocar abre as sessões filtradas do diretório.
 - Inbox global de perguntas e permissões pendentes. A verificação é sob demanda,

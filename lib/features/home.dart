@@ -36,6 +36,7 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _checking = false;
   bool _loadingRecentSessions = false;
   Map<String, List<Session>> _serverRecentSessions = {};
+  Map<String, String> _recentSessionCursors = {};
   List<String> _recentSessionErrors = [];
   HomeDestination _destination = HomeDestination.activity;
   final Set<HomeDestination> _visitedDestinations = {
@@ -143,6 +144,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     final sessionsByMachine = <String, List<Session>>{};
+    final cursorsByMachine = <String, String>{};
     final errors = <String>[];
     for (final result in results) {
       if (result.error != null) {
@@ -150,14 +152,23 @@ class _HomeScreenState extends State<HomeScreen> {
         if (previousSessions != null) {
           sessionsByMachine[result.machine.id] = previousSessions;
         }
+        final previousCursor = _recentSessionCursors[result.machine.id];
+        if (previousCursor != null) {
+          cursorsByMachine[result.machine.id] = previousCursor;
+        }
         errors.add('${result.machine.name}: ${result.error}');
         continue;
       }
       sessionsByMachine[result.machine.id] = result.sessions;
+      final cursor = result.cursor;
+      if (cursor != null) {
+        cursorsByMachine[result.machine.id] = cursor;
+      }
     }
 
     setState(() {
       _serverRecentSessions = sessionsByMachine;
+      _recentSessionCursors = cursorsByMachine;
       _recentSessionErrors = errors;
       _loadingRecentSessions = false;
     });
@@ -169,7 +180,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final api = widget.apiFactory(machine);
     try {
       final page = await api.listAll(limit: recentSessionsPerMachine);
-      return _RecentSessionsResult(machine, page.sessions);
+      return _RecentSessionsResult(machine, page.sessions, cursor: page.cursor);
     } catch (exception) {
       return _RecentSessionsResult(
         machine,
@@ -178,6 +189,52 @@ class _HomeScreenState extends State<HomeScreen> {
       );
     } finally {
       api.close();
+    }
+  }
+
+  Future<void> _loadMoreRecentSessions(Machine machine) async {
+    final cursor = _recentSessionCursors[machine.id];
+    if (_loadingRecentSessions || cursor == null) {
+      return;
+    }
+    setState(() {
+      _loadingRecentSessions = true;
+      _recentSessionErrors = [];
+    });
+    final api = widget.apiFactory(machine);
+    try {
+      final page = await api.listAll(
+        limit: recentSessionsPerMachine,
+        cursor: cursor,
+      );
+      if (!mounted) {
+        return;
+      }
+      final sessionsByID = <String, Session>{
+        for (final session in _serverRecentSessions[machine.id] ?? <Session>[])
+          session.id: session,
+        for (final session in page.sessions) session.id: session,
+      };
+      setState(() {
+        _serverRecentSessions[machine.id] = sessionsByID.values.toList();
+        final nextCursor = page.cursor;
+        if (nextCursor == null || nextCursor == cursor) {
+          _recentSessionCursors.remove(machine.id);
+        } else {
+          _recentSessionCursors[machine.id] = nextCursor;
+        }
+      });
+    } catch (exception) {
+      if (mounted) {
+        setState(() {
+          _recentSessionErrors = ['${machine.name}: $exception'];
+        });
+      }
+    } finally {
+      api.close();
+      if (mounted) {
+        setState(() => _loadingRecentSessions = false);
+      }
     }
   }
 
@@ -478,6 +535,18 @@ class _HomeScreenState extends State<HomeScreen> {
             _bookmarkCard(bookmark),
             const SizedBox(height: 10),
           ],
+          for (final machine in store.machines)
+            if (_recentSessionCursors.containsKey(machine.id)) ...[
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                key: ValueKey('load-more-sessions-${machine.id}'),
+                onPressed: _loadingRecentSessions
+                    ? null
+                    : () => _loadMoreRecentSessions(machine),
+                icon: const Icon(Icons.expand_more),
+                label: Text('Carregar mais 10 sessões · ${machine.name}'),
+              ),
+            ],
           if (activitySessions.isNotEmpty) ...[
             const SizedBox(height: 20),
             _browseMachinesCard(),
@@ -774,12 +843,13 @@ class _HomeScreenState extends State<HomeScreen> {
 class _RecentSessionsResult {
   final Machine machine;
   final List<Session> sessions;
-  final String? error;
+  final String? error, cursor;
 
   const _RecentSessionsResult(
     this.machine,
     this.sessions, {
     this.error,
+    this.cursor,
   });
 }
 
