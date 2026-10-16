@@ -6,6 +6,7 @@ import '../core/store.dart';
 import 'chat.dart';
 import 'common.dart';
 import 'design.dart';
+import 'session_directory_picker.dart';
 
 class SessionsScreen extends StatefulWidget {
   final AppStore store;
@@ -93,13 +94,15 @@ class _SessionsScreenState extends State<SessionsScreen> {
         context,
         MaterialPageRoute(
             builder: (_) => ChatScreen(
-                store: widget.store, machine: widget.machine, session: s)));
+                store: widget.store,
+                machine: widget.machine,
+                session: s,
+                apiOverride: widget.apiFactory(widget.machine))));
     if (mounted) _load();
   }
 
   Future<void> _directory() async {
-    final path = await askText(context, 'Diretório remoto',
-        hint: '/workspace/project-1', value: directory ?? '');
+    final path = await _chooseDirectory();
     if (path == null || !mounted) return;
     try {
       await widget.store.putMachine(
@@ -133,10 +136,18 @@ class _SessionsScreenState extends State<SessionsScreen> {
     }
   }
 
+  Future<String?> _chooseDirectory() => showDialog<String>(
+        context: context,
+        builder: (_) => SessionDirectoryPicker(
+          store: widget.store,
+          machine: widget.machine,
+          apiFactory: widget.apiFactory,
+          initialDirectory: directory,
+        ),
+      );
+
   Future<void> _create() async {
-    final path = directory ??
-        await askText(context, 'Diretório para nova sessão',
-            hint: '/workspace/project-1');
+    final path = directory ?? await _chooseDirectory();
     if (path == null || !mounted) return;
     final title =
         await askText(context, 'Nome da sessão', hint: 'Implementar checkout');

@@ -3,7 +3,7 @@
 ## Executado
 
 - `make validate` — formatação sem diferenças, `flutter analyze --no-fatal-infos`
-  sem issues, 59 testes Flutter/Dart e 8 testes de configuração Android/iOS.
+  sem issues, 63 testes Flutter/Dart e 8 testes de configuração Android/iOS.
 - `make build-check` — APK Android debug e iOS Release sem assinatura compilados.
 - `make test-ios-simulator` — fluxo de onboarding passou no simulador iOS.
 
@@ -15,6 +15,13 @@ chamado pela suíte automatizada. Há cobertura para paginação global, sessõe
 fora do app na tela **Trabalho**, consulta de pendências por localização, permissões,
 MCPs e skills. A paginação de recentes cobre lotes de 10, cursor opaco, ausência
 de duplicatas, fim da listagem, reinício ao atualizar e nova tentativa após falha.
+Há regressões para busca por título além da primeira página, sugestões de pastas,
+deduplicação de caminhos, falhas parciais e cancelamento sem criar uma sessão.
+
+Uma consulta SSH somente leitura confirmou que a sessão relatada existe no serviço
+OpenCode v2.0.29 remoto e ocupa a posição 17 (segunda página de 10). O endpoint
+publicado pela tailnet aponta para outro processo na porta 4096, com autenticação:
+sua resposta autenticada ainda não foi comparada à do serviço compartilhado.
 
 O build iOS ainda avisa que `flutter_secure_storage` não oferece suporte ao Swift
 Package Manager; o Flutter informa que isso poderá virar erro numa versão futura.
@@ -56,6 +63,10 @@ Package Manager; o Flutter informa que isso poderá virar erro numa versão futu
     **Trabalho** ao reabrir a aba ou puxar para atualizar.
 16. Em **Trabalho**, tocar em **Carregar mais 10 sessões** da máquina indicada;
     conferir que a lista cresce sem duplicatas e que o botão desaparece ao final.
+17. Buscar em **Trabalho** pelo título de uma sessão fora da primeira página;
+    confirmar que a API retorna a sessão e que o botão do topo atualiza a lista.
+18. Em **Nova sessão**, escolher um projeto/pasta sugerida sem digitar o caminho;
+    repetir com caminho manual e cancelar antes da criação.
 
 Uma ferramenta interrompida por reboot não continua automaticamente. A retomada
 valida o histórico da sessão e uma nova continuação enviada pelo usuário.

@@ -179,6 +179,44 @@ void main() {
     expect(loadMore, findsNothing);
     await tester.pumpWidget(const SizedBox.shrink());
   });
+
+  testWidgets(
+      'Should search remote titles beyond the first ten recent sessions',
+      (tester) async {
+    final searches = <String?>[];
+    const title = 'Análise da planilha e pendências para deploy em VPS';
+    await _showPaginatedHome(tester, (request) async {
+      final search = request.url.queryParameters['search'];
+      searches.add(search);
+      if (search == null) {
+        return _sessionPage(0, 10, cursor: 'next-page');
+      }
+      expect(search, 'Análise da planilha');
+      expect(request.url.queryParameters.containsKey('cursor'), isFalse);
+      return http.Response(
+          jsonEncode({
+            'data': [
+              {
+                'id': 'ses_planilha',
+                'title': title,
+                'location': {'directory': '/work/project'},
+                'time': {'created': 100, 'updated': 200},
+              },
+            ],
+            'cursor': {'previous': null, 'next': null},
+          }),
+          200);
+    });
+    expect(find.text(title), findsNothing);
+    await tester.enterText(find.byType(TextField), 'Análise da planilha');
+    await tester.tap(find.byTooltip('Buscar sessões'));
+    await tester.pumpAndSettle();
+    expect(searches, [null, 'Análise da planilha']);
+    expect(find.text(title), findsOneWidget);
+    expect(find.text('1 recentes'), findsOneWidget);
+    expect(find.text('Session 0'), findsNothing);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
 }
 
 http.Response _sessionPage(int start, int count, {String? cursor}) {

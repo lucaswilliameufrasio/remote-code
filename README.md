@@ -10,10 +10,15 @@ celular. O nome comercial é provisório; o projeto técnico se chama `remote_de
 - HTTP Basic Auth, senha e dados locais no Android Keystore/iOS Keychain.
 - API HTTP OpenCode v2: sessões globais paginadas com busca por cursor opaco.
 - Listagem por diretório, cadastro de caminhos e abertura direta pelo ID.
+- Ao iniciar uma sessão, seletor de pasta com busca por nome/caminho e sugestões
+  de projetos, sessões recentes e diretórios salvos da máquina; também aceita
+  digitar outro caminho completo.
 - Tela **Trabalho** combina atalhos locais com as 10 sessões globais mais
   recentes de cada máquina; atualiza ao reabrir a aba ou puxar para atualizar.
   O botão **Carregar mais 10 sessões** busca a próxima página da máquina indicada
   sem repetir sessões; desaparece quando não há mais páginas.
+  A busca por título consulta todas as sessões no servidor, não apenas as dez
+  carregadas. A seta de atualização do topo também recarrega as sessões.
 - Aba de projetos organizada por máquina, usando projeto/worktree do OpenCode e
   diretório como alternativa; tocar abre as sessões filtradas do diretório.
 - Inbox global de perguntas e permissões pendentes. A verificação é sob demanda,

@@ -38,6 +38,8 @@ class _HomeScreenState extends State<HomeScreen> {
   Map<String, List<Session>> _serverRecentSessions = {};
   Map<String, String> _recentSessionCursors = {};
   List<String> _recentSessionErrors = [];
+  final _sessionSearchController = TextEditingController();
+  String _sessionSearch = '';
   HomeDestination _destination = HomeDestination.activity;
   final Set<HomeDestination> _visitedDestinations = {
     HomeDestination.activity,
@@ -64,6 +66,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void dispose() {
     store.removeListener(_changed);
+    _sessionSearchController.dispose();
     super.dispose();
   }
 
@@ -179,7 +182,10 @@ class _HomeScreenState extends State<HomeScreen> {
   ) async {
     final api = widget.apiFactory(machine);
     try {
-      final page = await api.listAll(limit: recentSessionsPerMachine);
+      final page = await api.listAll(
+        limit: recentSessionsPerMachine,
+        search: _sessionSearch,
+      );
       return _RecentSessionsResult(machine, page.sessions, cursor: page.cursor);
     } catch (exception) {
       return _RecentSessionsResult(
@@ -206,6 +212,7 @@ class _HomeScreenState extends State<HomeScreen> {
       final page = await api.listAll(
         limit: recentSessionsPerMachine,
         cursor: cursor,
+        search: _sessionSearch,
       );
       if (!mounted) {
         return;
@@ -242,6 +249,14 @@ class _HomeScreenState extends State<HomeScreen> {
     await Future.wait<void>([_check(), _loadRecentSessions()]);
   }
 
+  Future<void> _searchSessions() async {
+    if (_loadingRecentSessions) {
+      return;
+    }
+    setState(() => _sessionSearch = _sessionSearchController.text.trim());
+    await _loadRecentSessions();
+  }
+
   List<Bookmark> _activitySessions() {
     final sessionsByKey = <String, Bookmark>{
       for (final bookmark in store.bookmarks) bookmark.key: bookmark,
@@ -271,7 +286,11 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     }
 
-    final activitySessions = sessionsByKey.values.toList();
+    final activitySessions = sessionsByKey.values
+        .where((bookmark) => bookmark.session.title
+            .toLowerCase()
+            .contains(_sessionSearch.toLowerCase()))
+        .toList();
     activitySessions.sort((first, second) {
       final openedComparison = second.opened.compareTo(first.opened);
       if (openedComparison != 0) {
@@ -382,8 +401,9 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         actions: [
           IconButton(
-            tooltip: 'Testar conexões',
-            onPressed: _checking ? null : _check,
+            tooltip: 'Atualizar conexões e sessões',
+            onPressed:
+                _checking || _loadingRecentSessions ? null : _refreshActivity,
             icon: const Icon(Icons.sync),
           ),
           const SizedBox(width: 6),
@@ -530,6 +550,29 @@ class _HomeScreenState extends State<HomeScreen> {
             ],
           ),
           const SizedBox(height: 13),
+          if (store.machines.isNotEmpty) ...[
+            TextField(
+              controller: _sessionSearchController,
+              enabled: !_loadingRecentSessions,
+              textInputAction: TextInputAction.search,
+              onSubmitted: (_) => _searchSessions(),
+              decoration: InputDecoration(
+                labelText: 'Buscar em todas as sessões',
+                hintText: 'Título da sessão no servidor',
+                prefixIcon: const Icon(Icons.search),
+                suffixIcon: IconButton(
+                  tooltip: 'Buscar sessões',
+                  onPressed: _loadingRecentSessions ? null : _searchSessions,
+                  icon: const Icon(Icons.arrow_forward),
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Até 10 por máquina em cada página. Busque pelo título ou carregue mais sessões abaixo.',
+            ),
+            const SizedBox(height: 13),
+          ],
           if (activitySessions.isEmpty) _emptyActivity(),
           for (final bookmark in activitySessions) ...[
             _bookmarkCard(bookmark),
@@ -579,7 +622,9 @@ class _HomeScreenState extends State<HomeScreen> {
             const SizedBox(height: 17),
             Text(
               hasMachines
-                  ? 'Tudo pronto para continuar'
+                  ? _sessionSearch.isNotEmpty
+                      ? 'Nenhuma sessão com esse título'
+                      : 'Tudo pronto para continuar'
                   : 'Conecte seu ambiente',
               style: Theme.of(context).textTheme.titleMedium?.copyWith(
                     fontWeight: FontWeight.w700,
@@ -588,7 +633,9 @@ class _HomeScreenState extends State<HomeScreen> {
             const SizedBox(height: 7),
             Text(
               hasMachines
-                  ? 'As sessões recentes das máquinas aparecerão aqui. Abrir uma também a salva como atalho no celular.'
+                  ? _sessionSearch.isNotEmpty
+                      ? 'Tente outro título ou apague a busca e toque na seta para ver as recentes.'
+                      : 'As sessões recentes das máquinas aparecerão aqui. Abrir uma também a salva como atalho no celular.'
                   : 'Adicione seu Mac, PC ou servidor para acessar as sessões do OpenCode.',
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                     color: AppColors.muted,
@@ -775,6 +822,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     builder: (_) => SessionsScreen(
                       store: store,
                       machine: machine,
+                      apiFactory: widget.apiFactory,
                     ),
                   ),
                 ),

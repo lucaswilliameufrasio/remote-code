@@ -17,7 +17,16 @@ phone requires typing.
   shortcut. Each machine with a next-page cursor offers a button to load ten more
   sessions, merging by session ID without duplicates. A failed page preserves
   existing results and its cursor for retry; a successful refresh resets to the
-  newest ten. Keep the bookmark limit and draft persistence unchanged.
+  newest ten. Title search queries the server instead of filtering only the first
+  page; results remain paginated. Keep the bookmark limit and draft persistence
+  unchanged.
+- Starting a session without a directory filter offers a folder picker populated
+  from the machine's saved paths, local bookmarks, server project canonical paths,
+  and the first 100 global sessions. Search matches project names or full paths;
+  manual absolute-path entry remains available. Partial discovery failures retain
+  local suggestions, and cancelling must not create a session. The same picker is
+  used to choose a different directory filter. This is known-directory discovery,
+  not a filesystem browser.
 - Add a global pending-actions destination. Load it when first opened, when
   revisited, or manually refreshed; do not add background polling or push
   delivery. Use the v2 location-scoped pending-form and permission-request
