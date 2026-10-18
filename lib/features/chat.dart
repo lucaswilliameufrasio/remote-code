@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import '../core/api.dart';
+import '../core/attachments.dart';
 import '../core/models.dart';
 import '../core/store.dart';
 import 'common.dart';
@@ -10,6 +11,7 @@ import 'design.dart';
 import 'question_response.dart';
 import 'tools.dart';
 import 'voice_prompt.dart';
+import 'attachment_picker.dart';
 
 class ChatScreen extends StatefulWidget {
   final AppStore store;
@@ -17,12 +19,14 @@ class ChatScreen extends StatefulWidget {
   final Session session;
   final OpenCodeApi? apiOverride;
   final VoiceRecognizer Function() voiceRecognizerFactory;
+  final AttachmentPicker attachmentPicker;
   const ChatScreen(
       {super.key,
       required this.store,
       required this.machine,
       required this.session,
       this.apiOverride,
+      this.attachmentPicker = const PlatformAttachmentPicker(),
       this.voiceRecognizerFactory = PlatformVoiceRecognizer.new});
   @override
   State<ChatScreen> createState() => _ChatScreenState();
@@ -44,6 +48,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       questions = [],
       agents = [];
   Json providers = {};
+  List<PromptAttachment> attachments = [];
+  bool pickingAttachment = false;
   String? agent,
       modelKey,
       error,
@@ -180,6 +186,39 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       return;
     }
     input.value = insertDictation(input.value, transcript);
+  }
+
+  Future<void> _pickAttachment() async {
+    if (sending || pickingAttachment) {
+      return;
+    }
+    if (attachments.length >= PromptAttachment.maxCount) {
+      notice(context, 'Anexe no máximo 4 arquivos por mensagem.');
+      return;
+    }
+    setState(() => pickingAttachment = true);
+    try {
+      final attachment = await widget.attachmentPicker.pick();
+      if (!mounted || attachment == null) {
+        return;
+      }
+      final updatedAttachments = [...attachments, attachment];
+      PromptAttachment.validateBatch(updatedAttachments);
+      setState(() => attachments = updatedAttachments);
+    } on AttachmentException catch (exception) {
+      if (mounted) {
+        notice(context, exception.message);
+      }
+    } catch (_) {
+      if (mounted) {
+        notice(context,
+            'Não foi possível ler o arquivo. Tente selecionar novamente.');
+      }
+    } finally {
+      if (mounted) {
+        setState(() => pickingAttachment = false);
+      }
+    }
   }
 
   @override
@@ -429,7 +468,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   Future<void> _send() async {
     final text = input.text.trim();
-    if (text.isEmpty || sending || error != null) return;
+    if ((text.isEmpty && attachments.isEmpty) ||
+        sending ||
+        pickingAttachment ||
+        error != null) {
+      return;
+    }
+    final attachedFiles = List<PromptAttachment>.of(attachments);
     final shouldQueue = busy;
     if (shouldQueue && inboxError != null) {
       notice(
@@ -437,6 +482,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       return;
     }
     setState(() => sending = true);
+    var attemptedPrompt = false;
     try {
       Json? model;
       for (final availableModel in models) {
@@ -444,14 +490,30 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           model = availableModel.$3;
         }
       }
+      PromptAttachment.validateBatch(attachedFiles);
+      if (attachedFiles.any((attachment) => attachment.modality != 'text')) {
+        final attachmentModel = await api.attachmentModel(
+          session,
+          selectedModel: shouldQueue ? null : model,
+        );
+        PromptAttachment.validateModel(attachedFiles, attachmentModel);
+      }
+      if (!mounted) {
+        return;
+      }
+      attemptedPrompt = true;
       await api.prompt(
         session,
         text,
         agent: shouldQueue ? null : agent,
         model: shouldQueue ? null : model,
         delivery: shouldQueue ? 'queue' : null,
+        attachments: attachedFiles,
       );
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
+      setState(() => attachments = []);
       input.clear();
       await _saveDraft();
       if (!shouldQueue) {
@@ -460,11 +522,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       await _refresh();
     } catch (e) {
       if (mounted) {
-        notice(context,
-            '$e\nO envio pode ter sido recebido. Confira o histórico antes de reenviar.');
+        notice(
+            context,
+            attemptedPrompt
+                ? '$e\nO envio pode ter sido recebido. Confira o histórico antes de reenviar.'
+                : e);
       }
     } finally {
-      if (mounted) setState(() => sending = false);
+      if (mounted) {
+        setState(() => sending = false);
+      }
     }
   }
 
@@ -1429,19 +1496,65 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 child: Row(
                   children: [
                     _composerOption(
+                      icon: Icons.attach_file,
+                      label: pickingAttachment
+                          ? 'Lendo arquivo…'
+                          : 'Anexar arquivo',
+                      onPressed:
+                          sending || pickingAttachment ? null : _pickAttachment,
+                    ),
+                    const SizedBox(width: 8),
+                    _composerOption(
                       icon: Icons.smart_toy_outlined,
                       label: _agentLabel,
-                      onPressed: busy ? null : _chooseAgent,
+                      onPressed: busy || sending || pickingAttachment
+                          ? null
+                          : _chooseAgent,
                     ),
                     const SizedBox(width: 8),
                     _composerOption(
                       icon: Icons.auto_awesome_outlined,
                       label: _modelLabel,
-                      onPressed: busy ? null : _chooseModel,
+                      onPressed: busy || sending || pickingAttachment
+                          ? null
+                          : _chooseModel,
                     ),
                   ],
                 ),
               ),
+              if (attachments.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(children: [
+                    for (var index = 0; index < attachments.length; index++)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 6),
+                        child: InputChip(
+                          avatar: Icon(attachments[index].modality == 'image'
+                              ? Icons.image_outlined
+                              : Icons.description_outlined),
+                          label: ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 200),
+                            child: Text(
+                                '${attachments[index].name} · ${(attachments[index].bytes.length / 1024).ceil()} KiB',
+                                overflow: TextOverflow.ellipsis),
+                          ),
+                          deleteButtonTooltipMessage:
+                              'Remover ${attachments[index].name}',
+                          onDeleted: sending || pickingAttachment
+                              ? null
+                              : () {
+                                  setState(() => attachments.removeAt(index));
+                                },
+                        ),
+                      ),
+                  ]),
+                ),
+                const Text(
+                    'Até 4 arquivos e 5 MiB no total. Anexos ficam só nesta tela até o envio.',
+                    style: TextStyle(fontSize: 11)),
+              ],
               const SizedBox(height: 8),
               Row(
                 crossAxisAlignment: CrossAxisAlignment.end,
@@ -1449,6 +1562,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   Expanded(
                     child: TextField(
                       controller: input,
+                      readOnly: sending,
                       minLines: 1,
                       maxLines: 5,
                       textCapitalization: TextCapitalization.sentences,
@@ -1461,16 +1575,19 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   const SizedBox(width: 9),
                   IconButton.filledTonal(
                     tooltip: 'Ditar mensagem',
-                    onPressed: _openVoicePrompt,
+                    onPressed:
+                        sending || pickingAttachment ? null : _openVoicePrompt,
                     icon: const Icon(Icons.mic_none),
                   ),
                   const SizedBox(width: 6),
                   IconButton.filled(
                     tooltip: busy ? 'Enfileirar mensagem' : 'Enviar mensagem',
-                    onPressed:
-                        sending || error != null || (busy && inboxError != null)
-                            ? null
-                            : _send,
+                    onPressed: sending ||
+                            pickingAttachment ||
+                            error != null ||
+                            (busy && inboxError != null)
+                        ? null
+                        : _send,
                     icon: sending
                         ? const SizedBox(
                             width: 19,
