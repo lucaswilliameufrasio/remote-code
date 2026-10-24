@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
@@ -6,18 +7,22 @@ import '../core/api.dart';
 import '../core/attachments.dart';
 import '../core/models.dart';
 import '../core/store.dart';
+import '../core/prompt_attempt.dart';
 import 'common.dart';
 import 'design.dart';
 import 'question_response.dart';
 import 'tools.dart';
 import 'voice_prompt.dart';
 import 'attachment_picker.dart';
+import 'remote_files.dart';
+import 'file_changes.dart';
 
 class ChatScreen extends StatefulWidget {
   final AppStore store;
   final Machine machine;
   final Session session;
   final OpenCodeApi? apiOverride;
+  final OpenCodeApiFactory apiFactory;
   final VoiceRecognizer Function() voiceRecognizerFactory;
   final AttachmentPicker attachmentPicker;
   const ChatScreen(
@@ -26,6 +31,7 @@ class ChatScreen extends StatefulWidget {
       required this.machine,
       required this.session,
       this.apiOverride,
+      this.apiFactory = OpenCodeApi.create,
       this.attachmentPicker = const PlatformAttachmentPicker(),
       this.voiceRecognizerFactory = PlatformVoiceRecognizer.new});
   @override
@@ -50,6 +56,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   Json providers = {};
   List<PromptAttachment> attachments = [];
   bool pickingAttachment = false;
+  PromptAttempt? pendingPrompt;
+  List<PromptAttachment> pendingAttachments = [];
+  bool reconcilingPrompt = false;
   String? agent,
       modelKey,
       error,
@@ -69,17 +78,24 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   bool showLatestButton = false;
   double previousScrollOffset = 0;
   final Set<String> queueMutations = {};
+  final Set<String> permissionMutations = {};
+  final Map<String, DateTime> permissionObservedAt = {};
+  DateTime? lastUpdated;
+  int? connectionStatus;
   int failures = 0, generation = 0;
   int settingsGeneration = 0;
   final ValueNotifier<int> settingsSheetRevision = ValueNotifier(0);
   Timer? poll, draftTimer;
   bool get busy => status == 'running' || status == 'busy' || status == 'retry';
+  bool get isClaude => widget.machine.backend == AgentBackend.claudeCode;
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    api = widget.apiOverride ?? OpenCodeApi(widget.machine);
+    api = widget.apiOverride ?? widget.apiFactory(widget.machine);
     session = widget.session;
+    pendingPrompt =
+        widget.store.bookmark(widget.machine.id, session.id)?.pendingPrompt;
     scroll.addListener(_updateLatestButton);
     input = TextEditingController(
         text:
@@ -281,19 +297,34 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         status =
             object(object(result[2])[session.id])['type'] as String? ?? 'idle';
         permissions = objects(result[3]);
+        final pendingIDs = permissions
+            .map((permission) => permission['id'])
+            .whereType<String>()
+            .toSet();
+        permissionObservedAt.removeWhere((id, _) => !pendingIDs.contains(id));
+        for (final id in pendingIDs) {
+          permissionObservedAt.putIfAbsent(id, DateTime.now);
+        }
         questions = objects(result[4]);
         inbox = inboxResult.$1 ?? inbox;
         inboxError = inboxResult.$2;
         error = null;
+        connectionStatus = null;
+        lastUpdated = DateTime.now();
         failures = 0;
       });
       if (wasAtLatest) {
         _scrollToLatest(animate: false);
       }
-    } catch (e) {
+      if (!sending && pendingPrompt != null) {
+        await _reconcilePrompt(silent: true);
+      }
+    } catch (exception) {
       if (mounted && !paused && run == generation) {
         setState(() {
-          error = e.toString();
+          error = exception.toString();
+          connectionStatus =
+              exception is ApiException ? exception.status : null;
           failures++;
           loadingInitialMessages = false;
         });
@@ -471,6 +502,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     if ((text.isEmpty && attachments.isEmpty) ||
         sending ||
         pickingAttachment ||
+        pendingPrompt != null ||
         error != null) {
       return;
     }
@@ -501,6 +533,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       if (!mounted) {
         return;
       }
+      final attempt = PromptAttempt.create(text);
+      await widget.store.remember(widget.machine, session,
+          draft: input.text, pendingPrompt: attempt);
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        pendingPrompt = attempt;
+        pendingAttachments = attachedFiles;
+      });
       attemptedPrompt = true;
       await api.prompt(
         session,
@@ -509,13 +551,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         model: shouldQueue ? null : model,
         delivery: shouldQueue ? 'queue' : null,
         attachments: attachedFiles,
+        messageID: attempt.id,
       );
       if (!mounted) {
         return;
       }
-      setState(() => attachments = []);
-      input.clear();
-      await _saveDraft();
+      await _acceptPrompt(attempt);
+      if (!mounted) {
+        return;
+      }
       if (!shouldQueue) {
         setState(() => status = 'busy');
       }
@@ -527,10 +571,111 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             attemptedPrompt
                 ? '$e\nO envio pode ter sido recebido. Confira o histórico antes de reenviar.'
                 : e);
+        if (attemptedPrompt) {
+          await _reconcilePrompt(silent: true);
+        }
       }
     } finally {
       if (mounted) {
         setState(() => sending = false);
+      }
+    }
+  }
+
+  Future<void> _acceptPrompt(PromptAttempt attempt) async {
+    if (!mounted || pendingPrompt?.id != attempt.id) {
+      return;
+    }
+    final clearText = input.text.trim() == attempt.text;
+    final previousDraft = input.text;
+    await widget.store.remember(widget.machine, session,
+        draft: clearText ? '' : previousDraft, clearPendingPrompt: true);
+    if (!mounted || pendingPrompt?.id != attempt.id) {
+      return;
+    }
+    if (clearText && input.text == previousDraft) {
+      input.clear();
+    }
+    final clearFiles = attachments.length == pendingAttachments.length &&
+        List.generate(
+                attachments.length,
+                (index) =>
+                    identical(attachments[index], pendingAttachments[index]))
+            .every((same) => same);
+    setState(() {
+      pendingPrompt = null;
+      pendingAttachments = [];
+      if (clearFiles) {
+        attachments = [];
+      }
+    });
+  }
+
+  Future<void> _reconcilePrompt({bool silent = false}) async {
+    final attempt = pendingPrompt;
+    if (attempt == null || reconcilingPrompt) {
+      return;
+    }
+    setState(() => reconcilingPrompt = true);
+    try {
+      final received = await api.promptReceived(session, attempt.id);
+      if (received) {
+        await _acceptPrompt(attempt);
+        if (mounted) {
+          notice(context,
+              'O servidor confirmou o recebimento pelo ID da mensagem. Nenhum reenvio foi feito.');
+        }
+      } else if (!silent && mounted) {
+        notice(context,
+            'Mensagem ainda não localizada. Isso não prova que o envio falhou. Confira a sessão antes de liberar outro envio.');
+      }
+    } catch (_) {
+      if (!silent && mounted) {
+        notice(context,
+            'Não foi possível confirmar o recebimento. O envio continua bloqueado para evitar duplicatas.');
+      }
+    } finally {
+      if (mounted) {
+        setState(() => reconcilingPrompt = false);
+      }
+    }
+  }
+
+  Future<void> _releaseUncertainPrompt() async {
+    final attempt = pendingPrompt;
+    if (attempt == null || reconcilingPrompt || sending) {
+      return;
+    }
+    final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+              title: const Text('Liberar novo envio?'),
+              content: const Text(
+                  'O servidor pode ter recebido a mensagem anterior. Confira o histórico e a fila. Um novo envio pode duplicar a tarefa; esta ação não reenvia nada.'),
+              actions: [
+                TextButton(
+                    onPressed: () => Navigator.pop(dialogContext, false),
+                    child: const Text('Cancelar')),
+                FilledButton(
+                    onPressed: () => Navigator.pop(dialogContext, true),
+                    child: const Text('Já conferi, liberar')),
+              ],
+            ));
+    if (confirmed != true || !mounted || pendingPrompt?.id != attempt.id) {
+      return;
+    }
+    try {
+      await widget.store.remember(widget.machine, session,
+          draft: input.text, clearPendingPrompt: true);
+      if (mounted && pendingPrompt?.id == attempt.id) {
+        setState(() {
+          pendingPrompt = null;
+          pendingAttachments = [];
+        });
+      }
+    } catch (exception) {
+      if (mounted) {
+        notice(context, exception);
       }
     }
   }
@@ -701,34 +846,64 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   Future<void> _respondToPermission(Json request, String reply) async {
     final requestID = request['id'];
-    if (requestID is! String) {
+    if (requestID is! String || permissionMutations.contains(requestID)) {
       return;
     }
-    if (reply == 'always') {
-      final confirmed = await showDialog<bool>(
-        context: context,
-        builder: (dialogContext) => AlertDialog(
-          title: const Text('Permitir sempre?'),
-          content: const Text(
-            'O OpenCode salvará esta decisão como uma permissão persistente.',
+    setState(() => permissionMutations.add(requestID));
+    try {
+      if (reply == 'always') {
+        final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('Permitir sempre?'),
+            content: SingleChildScrollView(
+                child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                  const Text(
+                      'O OpenCode salvará esta decisão como uma permissão persistente.'),
+                  const SizedBox(height: 8),
+                  SelectableText(
+                      'Ação: ${request['permission']}\nProjeto: ${session.directory}\nPadrões persistentes: ${pretty(request['save'] ?? request['patterns'])}'),
+                ])),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('Cancelar'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text('Permitir sempre'),
+              ),
+            ],
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext, false),
-              child: const Text('Cancelar'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(dialogContext, true),
-              child: const Text('Permitir sempre'),
-            ),
-          ],
-        ),
-      );
-      if (confirmed != true || !mounted) {
-        return;
+        );
+        if (confirmed != true || !mounted) {
+          return;
+        }
+      }
+      await api.permission(session, requestID, reply);
+      await _refresh();
+    } on ApiException catch (exception) {
+      if (exception.status == 404 || exception.status == 409) {
+        await _refresh();
+        if (mounted) {
+          notice(context,
+              'A solicitação mudou ou já foi resolvida. A lista foi atualizada.');
+        }
+      } else if (mounted) {
+        notice(context, exception);
+      }
+    } catch (exception) {
+      if (mounted) {
+        notice(context, exception);
+      }
+    } finally {
+      if (mounted) {
+        setState(() => permissionMutations.remove(requestID));
       }
     }
-    await _action(() => api.permission(session, requestID, reply));
   }
 
   Future<void> _action(Future<void> Function() task) async {
@@ -741,6 +916,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _details(String kind) async {
+    if (kind == 'diff') {
+      await Navigator.push<void>(
+          context,
+          MaterialPageRoute(
+            builder: (_) => FileChangesScreen(api: api, session: session),
+          ));
+      return;
+    }
     try {
       final value = await api.details(session, kind);
       if (!mounted) return;
@@ -770,6 +953,20 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _browseFiles() async {
+    final directory = session.directory;
+    final path = await Navigator.push<String>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => RemoteFilesScreen(api: api, directory: directory),
+        ));
+    if (path != null && mounted) {
+      input.value = insertDictation(input.value,
+          'Arquivo do projeto ${jsonEncode(directory)}: ${jsonEncode(path)}');
+      await _saveDraft();
+    }
+  }
+
   Future<void> _answerQuestion(Json request) async {
     final answers = await showModalBottomSheet<Json>(
       context: context,
@@ -787,7 +984,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   String get _statusLabel {
     if (error != null) {
-      return 'Reconectando';
+      return switch (connectionStatus) {
+        401 || 403 => 'Acesso negado',
+        404 => 'Sessão ou API indisponível',
+        _ => 'Sem atualização · reconectando',
+      };
     }
     return switch (status) {
       'running' || 'busy' => 'Executando',
@@ -906,6 +1107,53 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     await _settings();
   }
 
+  Future<void> _forkClaudeSession() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Continuar em uma cópia do histórico?'),
+        content: const Text(
+            'O histórico original do Claude Code será preservado. Os arquivos do projeto continuam compartilhados: edições feitas aqui também aparecem no computador.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancelar')),
+          FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Criar continuação')),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) {
+      return;
+    }
+    setState(() => sending = true);
+    try {
+      final continuation = await api.forkSession(session);
+      await widget.store.remember(widget.machine, continuation);
+      if (!mounted) {
+        return;
+      }
+      await Navigator.pushReplacement(
+          context,
+          MaterialPageRoute<void>(
+            builder: (_) => ChatScreen(
+                store: widget.store,
+                machine: widget.machine,
+                session: continuation,
+                apiFactory: widget.apiFactory),
+          ));
+    } catch (exception) {
+      if (mounted) {
+        notice(context, exception);
+      }
+    } finally {
+      if (mounted) {
+        setState(() => sending = false);
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -951,20 +1199,34 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               if (value == 'settings') {
                 _refreshSettings();
               }
+              if (value == 'files') {
+                _browseFiles();
+              }
             },
-            itemBuilder: (_) => const [
-              PopupMenuItem(
-                value: 'tools',
-                child: Text('Ferramentas e skills'),
-              ),
-              PopupMenuItem(
-                value: 'settings',
-                child: Text('Atualizar agentes e modelos'),
-              ),
-              PopupMenuItem(value: 'id', child: Text('Copiar ID da sessão')),
-              PopupMenuItem(value: 'diff', child: Text('Ver alterações')),
-              PopupMenuItem(value: 'context', child: Text('Ver contexto')),
-              PopupMenuItem(value: 'refresh', child: Text('Reconectar agora')),
+            itemBuilder: (_) => [
+              if (!isClaude)
+                const PopupMenuItem(
+                    value: 'files', child: Text('Arquivos do projeto')),
+              if (!isClaude)
+                const PopupMenuItem(
+                  value: 'tools',
+                  child: Text('Ferramentas e skills'),
+                ),
+              if (!isClaude)
+                const PopupMenuItem(
+                  value: 'settings',
+                  child: Text('Atualizar agentes e modelos'),
+                ),
+              const PopupMenuItem(
+                  value: 'id', child: Text('Copiar ID da sessão')),
+              if (!isClaude)
+                const PopupMenuItem(
+                    value: 'diff', child: Text('Ver alterações')),
+              if (!isClaude)
+                const PopupMenuItem(
+                    value: 'context', child: Text('Ver contexto')),
+              const PopupMenuItem(
+                  value: 'refresh', child: Text('Reconectar agora')),
             ],
           ),
         ],
@@ -984,7 +1246,20 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                       : _conversation(),
             ),
             if (busy) _executionBar(),
-            _composer(),
+            if (isClaude && session.external)
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  const Text(
+                      'Histórico externo em leitura. Para conversar, crie uma continuação separada; os arquivos permanecem compartilhados.'),
+                  const SizedBox(height: 8),
+                  FilledButton(
+                      onPressed: sending ? null : _forkClaudeSession,
+                      child: const Text('Continuar no CodeRelay')),
+                ]),
+              )
+            else
+              _composer(),
           ],
         ),
       ),
@@ -1016,9 +1291,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           const SizedBox(width: 8),
           Expanded(
             child: Text(
-              error == null
+              lastUpdated == null
                   ? _statusLabel
-                  : 'Conexão instável · rascunho salvo',
+                  : '$_statusLabel · atualizado ${TimeOfDay.fromDateTime(lastUpdated!).format(context)}',
               style: Theme.of(context).textTheme.labelMedium?.copyWith(
                     color: error != null ? AppColors.danger : AppColors.muted,
                     fontWeight: FontWeight.w600,
@@ -1043,7 +1318,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
-                  '$error\nTentando reconectar. Seu rascunho continua salvo.',
+                  '$error\n${connectionStatus == 401 || connectionStatus == 403 ? 'Confira as credenciais e as permissões da máquina.' : 'Tentando atualizar a sessão.'} O texto do rascunho continua salvo.',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         height: 1.35,
                       ),
@@ -1067,7 +1342,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     if (permissions.isEmpty &&
         questions.isEmpty &&
         pendingMessages.isEmpty &&
-        inboxError == null) {
+        inboxError == null &&
+        pendingPrompt == null) {
       return const SizedBox.shrink();
     }
     return ConstrainedBox(
@@ -1078,6 +1354,33 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         shrinkWrap: true,
         padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
         children: [
+          if (pendingPrompt != null)
+            Card(
+                child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('Envio sem confirmação',
+                              style: TextStyle(fontWeight: FontWeight.bold)),
+                          const Text(
+                              'Nenhuma mensagem será repetida automaticamente. O rascunho foi preservado; estamos conferindo o ID no histórico e na fila.'),
+                          Wrap(spacing: 8, children: [
+                            TextButton(
+                                onPressed: reconcilingPrompt || sending
+                                    ? null
+                                    : () => _reconcilePrompt(),
+                                child: Text(reconcilingPrompt
+                                    ? 'Conferindo…'
+                                    : 'Conferir recebimento')),
+                            TextButton(
+                                onPressed: reconcilingPrompt || sending
+                                    ? null
+                                    : _releaseUncertainPrompt,
+                                child:
+                                    const Text('Revisar e liberar novo envio')),
+                          ]),
+                        ]))),
           if (pendingCount > 0)
             Padding(
               padding: const EdgeInsets.fromLTRB(4, 2, 4, 8),
@@ -1227,6 +1530,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   Widget _permissionCard(Json request) {
     final resources = (request['patterns'] as List? ?? const []).join('\n');
+    final responding = permissionMutations.contains(request['id']);
+    final observedAt = permissionObservedAt[request['id']];
     return Card(
       color: AppColors.surfaceRaised,
       child: Padding(
@@ -1259,6 +1564,18 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                     color: AppColors.muted,
                   ),
             ),
+            Text('Projeto: ${session.directory}',
+                style: Theme.of(context).textTheme.bodySmall),
+            if (observedAt != null)
+              Tooltip(
+                message:
+                    'Primeira detecção nesta tela, não a criação no servidor. Reinicia ao reabrir a sessão.',
+                child: Text(
+                    'Detectada neste celular às ${TimeOfDay.fromDateTime(observedAt).format(context)}',
+                    style: Theme.of(context).textTheme.bodySmall),
+              ),
+            if (request['message'] is String)
+              SelectableText(request['message'] as String),
             if (resources.isNotEmpty) ...[
               const SizedBox(height: 5),
               SelectableText(resources),
@@ -1273,17 +1590,24 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               spacing: 8,
               children: [
                 OutlinedButton(
-                  onPressed: () => _respondToPermission(request, 'reject'),
+                  onPressed: responding
+                      ? null
+                      : () => _respondToPermission(request, 'reject'),
                   child: const Text('Negar'),
                 ),
                 FilledButton(
-                  onPressed: () => _respondToPermission(request, 'once'),
+                  onPressed: responding
+                      ? null
+                      : () => _respondToPermission(request, 'once'),
                   child: const Text('Uma vez'),
                 ),
-                TextButton(
-                  onPressed: () => _respondToPermission(request, 'always'),
-                  child: const Text('Sempre permitir'),
-                ),
+                if (!isClaude)
+                  TextButton(
+                    onPressed: responding
+                        ? null
+                        : () => _respondToPermission(request, 'always'),
+                    child: const Text('Sempre permitir'),
+                  ),
               ],
             ),
           ],
@@ -1384,39 +1708,41 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   Widget _emptyConversation() {
     return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 58,
-              height: 58,
-              decoration: BoxDecoration(
-                color: AppColors.accentSoft,
-                borderRadius: BorderRadius.circular(20),
+      child: SingleChildScrollView(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 58,
+                height: 58,
+                decoration: BoxDecoration(
+                  color: AppColors.accentSoft,
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: const Icon(Icons.terminal, color: AppColors.accent),
               ),
-              child: const Icon(Icons.terminal, color: AppColors.accent),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              error != null ? 'Aguardando conexão' : 'Sessão pronta',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
-            ),
-            const SizedBox(height: 7),
-            Text(
-              error != null
-                  ? 'Assim que a máquina voltar, o histórico será carregado.'
-                  : 'Escreva uma instrução abaixo para continuar o trabalho.',
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: AppColors.muted,
-                    height: 1.4,
-                  ),
-            ),
-          ],
+              const SizedBox(height: 16),
+              Text(
+                error != null ? 'Aguardando conexão' : 'Sessão pronta',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+              ),
+              const SizedBox(height: 7),
+              Text(
+                error != null
+                    ? 'Assim que a máquina voltar, o histórico será carregado.'
+                    : 'Escreva uma instrução abaixo para continuar o trabalho.',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: AppColors.muted,
+                      height: 1.4,
+                    ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -1495,22 +1821,25 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 scrollDirection: Axis.horizontal,
                 child: Row(
                   children: [
-                    _composerOption(
-                      icon: Icons.attach_file,
-                      label: pickingAttachment
-                          ? 'Lendo arquivo…'
-                          : 'Anexar arquivo',
-                      onPressed:
-                          sending || pickingAttachment ? null : _pickAttachment,
-                    ),
+                    if (!isClaude)
+                      _composerOption(
+                        icon: Icons.attach_file,
+                        label: pickingAttachment
+                            ? 'Lendo arquivo…'
+                            : 'Anexar arquivo',
+                        onPressed: sending || pickingAttachment
+                            ? null
+                            : _pickAttachment,
+                      ),
                     const SizedBox(width: 8),
-                    _composerOption(
-                      icon: Icons.smart_toy_outlined,
-                      label: _agentLabel,
-                      onPressed: busy || sending || pickingAttachment
-                          ? null
-                          : _chooseAgent,
-                    ),
+                    if (!isClaude)
+                      _composerOption(
+                        icon: Icons.smart_toy_outlined,
+                        label: _agentLabel,
+                        onPressed: busy || sending || pickingAttachment
+                            ? null
+                            : _chooseAgent,
+                      ),
                     const SizedBox(width: 8),
                     _composerOption(
                       icon: Icons.auto_awesome_outlined,
@@ -1581,11 +1910,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   ),
                   const SizedBox(width: 6),
                   IconButton.filled(
-                    tooltip: busy ? 'Enfileirar mensagem' : 'Enviar mensagem',
+                    tooltip: busy && !isClaude
+                        ? 'Enfileirar mensagem'
+                        : 'Enviar mensagem',
                     onPressed: sending ||
                             pickingAttachment ||
+                            pendingPrompt != null ||
                             error != null ||
-                            (busy && inboxError != null)
+                            (busy && (isClaude || inboxError != null))
                         ? null
                         : _send,
                     icon: sending

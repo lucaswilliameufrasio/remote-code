@@ -46,7 +46,7 @@ class _SessionToolsScreenState extends State<SessionToolsScreen> {
   void initState() {
     super.initState();
     ownsApi = widget.api == null;
-    api = widget.api ?? OpenCodeApi(widget.machine);
+    api = widget.api ?? OpenCodeApi.create(widget.machine);
     _loadCapabilities();
   }
 

@@ -19,7 +19,7 @@ class SessionsScreen extends StatefulWidget {
     required this.store,
     required this.machine,
     this.initialDirectory,
-    this.apiFactory = OpenCodeApi.new,
+    this.apiFactory = OpenCodeApi.create,
   });
   @override
   State<SessionsScreen> createState() => _SessionsScreenState();
@@ -66,8 +66,9 @@ class _SessionsScreenState extends State<SessionsScreen> {
         page = SessionPage(
             await api.listDirectory(directory!,
                 search: search.text.trim(), limit: 500),
-            warning:
-                'Até 500 sessões deste diretório. Use a busca no servidor ou abra pelo ID para sessões mais antigas.');
+            warning: widget.machine.backend == AgentBackend.claudeCode
+                ? 'Até 100 sessões deste diretório. Use a busca ou abra pelo ID para sessões mais antigas.'
+                : 'Até 500 sessões deste diretório. Use a busca no servidor ou abra pelo ID para sessões mais antigas.');
       }
       if (!mounted || run != generation) return;
       final unique = <String, Session>{
@@ -173,7 +174,7 @@ class _SessionsScreenState extends State<SessionsScreen> {
           children: [
             Text(widget.machine.name),
             Text(
-              'Sessões OpenCode',
+              'Sessões ${widget.machine.backend.label}',
               style: Theme.of(context).textTheme.labelSmall?.copyWith(
                     color: AppColors.muted,
                   ),

@@ -592,7 +592,7 @@ class PendingInboxScreenState extends State<PendingInboxScreen> {
   Widget build(BuildContext context) {
     final pendingActions = snapshot?.actions ?? const <PendingAction>[];
     final scanProgress = totalLocations == 0
-        ? 'Consultando localizações do OpenCode…'
+        ? 'Consultando localizações dos agentes…'
         : 'Verificando $checkedLocations de $totalLocations localizações…';
 
     return RefreshIndicator(
@@ -731,7 +731,7 @@ class PendingInboxScreenState extends State<PendingInboxScreen> {
             ),
             const SizedBox(height: 6),
             Text(
-              'Puxe para atualizar. O Remoto consulta as solicitações das localizações conhecidas deste servidor.',
+              'Puxe para atualizar. O CodeRelay consulta as solicitações das localizações conhecidas deste servidor.',
               style: Theme.of(context)
                   .textTheme
                   .bodySmall

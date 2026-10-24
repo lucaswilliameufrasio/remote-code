@@ -4,11 +4,14 @@ import '../core/concurrency.dart';
 import '../core/models.dart';
 import '../core/store.dart';
 import 'chat.dart';
+import 'brand.dart';
 import 'common.dart';
 import 'design.dart';
 import 'pending_inbox.dart';
 import 'projects.dart';
 import 'sessions.dart';
+import 'pairing.dart';
+import 'machine_setup.dart';
 
 const allowTailnetHttp = bool.fromEnvironment('ALLOW_TAILNET_HTTP');
 const allowLocalServerHttp = bool.fromEnvironment('ALLOW_LOCAL_SERVER_HTTP');
@@ -20,7 +23,7 @@ class HomeScreen extends StatefulWidget {
   const HomeScreen({
     super.key,
     required this.store,
-    this.apiFactory = OpenCodeApi.new,
+    this.apiFactory = OpenCodeApi.create,
   });
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -103,7 +106,10 @@ class _HomeScreenState extends State<HomeScreen> {
     final saved = await Navigator.push<bool>(
         context,
         MaterialPageRoute(
-            builder: (_) => MachineEditor(store: store, machine: machine)));
+            builder: (_) => MachineEditor(
+                store: store,
+                machine: machine,
+                apiFactory: widget.apiFactory)));
     if (saved == true && mounted) {
       await Future.wait<void>([_check(), _loadRecentSessions()]);
     }
@@ -365,32 +371,20 @@ class _HomeScreenState extends State<HomeScreen> {
       appBar: AppBar(
         title: Row(
           children: [
-            Container(
-              width: 38,
-              height: 38,
-              decoration: BoxDecoration(
-                color: AppColors.accentSoft,
-                borderRadius: BorderRadius.circular(13),
-              ),
-              child: const Icon(
-                Icons.terminal,
-                color: AppColors.accent,
-                size: 21,
-              ),
-            ),
+            const BrandMark(size: 38),
             const SizedBox(width: 12),
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'REMOTO',
+                  'CodeRelay',
                   style: Theme.of(context).textTheme.titleSmall?.copyWith(
                         fontWeight: FontWeight.w800,
                         letterSpacing: 1.7,
                       ),
                 ),
                 Text(
-                  'OpenCode no celular',
+                  'Agentes de código no celular',
                   style: Theme.of(context).textTheme.labelSmall?.copyWith(
                         color: AppColors.muted,
                       ),
@@ -636,7 +630,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   ? _sessionSearch.isNotEmpty
                       ? 'Tente outro título ou apague a busca e toque na seta para ver as recentes.'
                       : 'As sessões recentes das máquinas aparecerão aqui. Abrir uma também a salva como atalho no celular.'
-                  : 'Adicione seu Mac, PC ou servidor para acessar as sessões do OpenCode.',
+                  : 'Adicione seu Mac, PC ou servidor para acessar sessões do OpenCode ou Claude Code.',
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                     color: AppColors.muted,
                     height: 1.4,
@@ -773,7 +767,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           const SizedBox(height: 7),
           Text(
-            'Abra sessões e acompanhe o OpenCode em cada ambiente.',
+            'Abra sessões do OpenCode ou Claude Code em cada ambiente.',
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                   color: AppColors.muted,
                   height: 1.4,
@@ -904,7 +898,12 @@ class _RecentSessionsResult {
 class MachineEditor extends StatefulWidget {
   final AppStore store;
   final Machine? machine;
-  const MachineEditor({super.key, required this.store, this.machine});
+  final OpenCodeApiFactory apiFactory;
+  const MachineEditor(
+      {super.key,
+      required this.store,
+      this.machine,
+      this.apiFactory = OpenCodeApi.create});
   @override
   State<MachineEditor> createState() => _MachineEditorState();
 }
@@ -912,11 +911,13 @@ class MachineEditor extends StatefulWidget {
 class _MachineEditorState extends State<MachineEditor> {
   final form = GlobalKey<FormState>();
   late final TextEditingController name, url, user, password, directories;
+  late AgentBackend backend;
   bool saving = false, obscure = true;
   @override
   void initState() {
     super.initState();
     final m = widget.machine;
+    backend = m?.backend ?? AgentBackend.openCode;
     name = TextEditingController(text: m?.name ?? '');
     url = TextEditingController(text: m?.url ?? '');
     user = TextEditingController(text: m?.username ?? 'opencode');
@@ -939,6 +940,7 @@ class _MachineEditorState extends State<MachineEditor> {
       url: url.text.trim().replaceFirst(RegExp(r'/$'), ''),
       username: user.text.trim(),
       password: password.text,
+      backend: backend,
       directories: directories.text
           .split('\n')
           .map((s) => s.trim())
@@ -951,14 +953,15 @@ class _MachineEditorState extends State<MachineEditor> {
     try {
       final m = _value();
       if (testOnly) {
-        final api = OpenCodeApi(m);
+        final api = widget.apiFactory(m);
         try {
           final h = await api.health();
           if (h['healthy'] != true) {
             throw const ApiException(0, 'Servidor não está saudável.');
           }
           if (mounted) {
-            notice(context, 'Conectado ao OpenCode ${h['version'] ?? ''}.');
+            notice(context,
+                'Conectado ao ${backend.label} ${h['version'] ?? ''}.');
           }
         } finally {
           api.close();
@@ -999,6 +1002,32 @@ class _MachineEditorState extends State<MachineEditor> {
     }
   }
 
+  Future<void> _pair() async {
+    if (backend != AgentBackend.openCode) {
+      notice(context, 'Claude Code usa a senha dedicada do adaptador no host.');
+      return;
+    }
+    final address = url.text.trim();
+    if (validateServerUrl(address) != null || !address.startsWith('https://')) {
+      notice(context, 'Informe primeiro a URL HTTPS da máquina.');
+      return;
+    }
+    final token = await Navigator.push<String>(
+        context,
+        MaterialPageRoute(
+          builder: (_) =>
+              PairingScreen(machine: _value(), apiFactory: widget.apiFactory),
+        ));
+    if (token != null && mounted) {
+      setState(() {
+        password.text = token;
+        obscure = true;
+      });
+      notice(context,
+          'Pareamento confirmado com OpenCode v2. Salve a máquina para guardar a credencial.');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -1022,7 +1051,9 @@ class _MachineEditorState extends State<MachineEditor> {
             ),
             const SizedBox(height: 9),
             Text(
-              'Use a URL HTTPS do Tailscale Serve e as credenciais do OpenCode.',
+              backend == AgentBackend.openCode
+                  ? 'Use a URL HTTPS do Tailscale Serve e as credenciais do OpenCode.'
+                  : 'Use a URL HTTPS do adaptador CodeRelay no computador. A senha é do adaptador, nunca a senha ou chave da Anthropic.',
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                     color: AppColors.muted,
                     height: 1.4,
@@ -1030,6 +1061,47 @@ class _MachineEditorState extends State<MachineEditor> {
             ),
             const SizedBox(height: 26),
             eyebrow('Identificação', color: AppColors.accent),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<AgentBackend>(
+              initialValue: backend,
+              decoration: InputDecoration(
+                labelText: 'Agente no computador',
+                helperText: widget.machine == null
+                    ? null
+                    : 'Para outro agente, adicione um cadastro separado.',
+              ),
+              items: [
+                for (final choice in AgentBackend.values)
+                  DropdownMenuItem(value: choice, child: Text(choice.label)),
+              ],
+              onChanged: saving || widget.machine != null
+                  ? null
+                  : (choice) {
+                      if (choice == null || choice == backend) {
+                        return;
+                      }
+                      setState(() {
+                        backend = choice;
+                        password.clear();
+                        user.text = choice == AgentBackend.openCode
+                            ? 'opencode'
+                            : 'coderelay';
+                      });
+                    },
+            ),
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              onPressed: saving
+                  ? null
+                  : () => Navigator.push<void>(
+                        context,
+                        MaterialPageRoute(
+                            builder: (_) =>
+                                MachineSetupScreen(backend: backend)),
+                      ),
+              icon: const Icon(Icons.help_outline),
+              label: const Text('Como configurar no computador'),
+            ),
             const SizedBox(height: 12),
             TextFormField(
               controller: name,
@@ -1051,10 +1123,12 @@ class _MachineEditorState extends State<MachineEditor> {
               autocorrect: false,
               keyboardType: TextInputType.url,
               textInputAction: TextInputAction.next,
-              decoration: const InputDecoration(
-                labelText: 'URL do OpenCode',
+              decoration: InputDecoration(
+                labelText: backend == AgentBackend.openCode
+                    ? 'URL do OpenCode'
+                    : 'URL do adaptador Claude Code',
                 hintText: 'https://mac.tailnet.ts.net',
-                prefixIcon: Icon(Icons.link),
+                prefixIcon: const Icon(Icons.link),
               ),
               validator: (value) {
                 final address = value ?? '';
@@ -1073,6 +1147,11 @@ class _MachineEditorState extends State<MachineEditor> {
             ),
             const SizedBox(height: 22),
             eyebrow('Autenticação', color: AppColors.accent),
+            if (backend == AgentBackend.openCode)
+              TextButton.icon(
+                  onPressed: saving ? null : _pair,
+                  icon: const Icon(Icons.link),
+                  label: const Text('Usar código temporário de pareamento')),
             const SizedBox(height: 12),
             TextFormField(
               controller: user,
@@ -1108,7 +1187,9 @@ class _MachineEditorState extends State<MachineEditor> {
                 ),
               ),
               validator: (value) => value == null || value.isEmpty
-                  ? 'Defina OPENCODE_SERVER_PASSWORD na máquina.'
+                  ? backend == AgentBackend.openCode
+                      ? 'Defina OPENCODE_SERVER_PASSWORD na máquina.'
+                      : 'Defina CODERELAY_ADAPTER_PASSWORD no adaptador.'
                   : null,
             ),
             const SizedBox(height: 12),

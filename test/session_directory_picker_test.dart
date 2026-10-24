@@ -21,6 +21,24 @@ const machine = Machine(
 void main() {
   setUp(() => FlutterSecureStorage.setMockInitialValues({}));
 
+  testWidgets('Should load authorized roots only after the user requests them',
+      (tester) async {
+    final store = AppStore();
+    await store.load();
+    final requests = <http.Request>[];
+    await tester.pumpWidget(MaterialApp(
+        home: SessionDirectoryPicker(
+            store: store,
+            machine: machine,
+            apiFactory: (machine) => _api(machine, requests: requests))));
+    await tester.pumpAndSettle();
+    expect(find.text('/work/allowed'), findsNothing);
+    await tester.tap(find.text('Carregar raízes autorizadas do host'));
+    await tester.pumpAndSettle();
+    expect(find.text('/work/allowed'), findsOneWidget);
+    expect(requests.where((request) => request.method == 'POST'), hasLength(1));
+  });
+
   testWidgets('Should suggest projects and recent folders without duplicates',
       (tester) async {
     final store = AppStore();
@@ -109,6 +127,15 @@ void main() {
 OpenCodeApi _api(Machine machine, {List<http.Request>? requests}) {
   return OpenCodeApi(machine, client: MockClient((request) async {
     requests?.add(request);
+    if (request.url.path == '/api/rpc/remote-code-files-v1/roots') {
+      return http.Response(
+          jsonEncode({
+            'output': {
+              'data': ['/work/allowed']
+            }
+          }),
+          200);
+    }
     if (request.url.path == '/api/project') {
       return http.Response(
           jsonEncode([

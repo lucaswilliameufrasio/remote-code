@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'models.dart';
 import 'security.dart';
+import 'prompt_attempt.dart';
 
 class AppStore extends ChangeNotifier {
   final FlutterSecureStorage storage;
@@ -83,7 +84,10 @@ class AppStore extends ChangeNotifier {
     return null;
   }
 
-  Future<void> remember(Machine m, Session s, {String? draft}) {
+  Future<void> remember(Machine m, Session s,
+      {String? draft,
+      PromptAttempt? pendingPrompt,
+      bool clearPendingPrompt = false}) {
     final old = bookmark(m.id, s.id);
     bookmarks.removeWhere((b) => b.machineID == m.id && b.session.id == s.id);
     bookmarks.insert(
@@ -92,7 +96,10 @@ class AppStore extends ChangeNotifier {
             machineID: m.id,
             session: s,
             opened: DateTime.now().millisecondsSinceEpoch,
-            draft: draft ?? old?.draft ?? ''));
+            draft: draft ?? old?.draft ?? '',
+            pendingPrompt: clearPendingPrompt
+                ? null
+                : pendingPrompt ?? old?.pendingPrompt));
     bookmarks = bookmarks.take(100).toList();
     final index = machines.indexWhere((v) => v.id == m.id);
     if (index >= 0) {

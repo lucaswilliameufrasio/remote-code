@@ -7,7 +7,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Remoto</string>
+	<string>CodeRelay</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -15,7 +15,7 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>remote_dev</string>
+	<string>CodeRelay</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -31,14 +31,16 @@
 		<key>NSAllowsArbitraryLoads</key>
 		<false/>
 	</dict>
+	<key>NSCameraUsageDescription</key>
+	<string>Ler o QR de pareamento da sua máquina. Nenhuma imagem é enviada ao servidor.</string>
+	<key>NSFaceIDUsageDescription</key>
+	<string>Usar Face ID para desbloquear o CodeRelay.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Conectar aos teus servidores OpenCode pela rede privada Tailscale.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Usar o microfone para ditar um prompt e revisar o texto antes de enviar.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Transcrever o ditado para texto editável antes de enviar ao OpenCode.</string>
-	<key>NSFaceIDUsageDescription</key>
-	<string>Usar Face ID para desbloquear o Remoto.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

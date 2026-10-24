@@ -20,3 +20,5 @@ __pycache__/
 *.pfx
 *.jks
 *.mobileprovision
+host/file-browser/node_modules/
+host/claude-code/.venv/

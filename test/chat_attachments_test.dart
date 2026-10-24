@@ -166,7 +166,14 @@ Future<void> _showChat(
       requests.add(request);
       final path = request.url.path;
       if (path.endsWith('/prompt')) {
-        return http.Response(jsonEncode({'data': {}}), promptStatus);
+        return http.Response(
+            jsonEncode({
+              'data': {
+                'id': object(jsonDecode(request.body))['id'],
+                'type': 'user',
+              }
+            }),
+            promptStatus);
       }
       if (path == '/api/session/ses_test') {
         return http.Response(
