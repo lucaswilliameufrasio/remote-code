@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'models.dart';
+import 'attachments.dart';
 
 class ApiException implements Exception {
   final int status;
@@ -294,7 +295,11 @@ class OpenCodeApi {
   }
 
   Future<void> prompt(Session session, String text,
-      {String? agent, Json? model, String? delivery}) async {
+      {String? agent,
+      Json? model,
+      String? delivery,
+      List<PromptAttachment> attachments = const []}) async {
+    PromptAttachment.validateBatch(attachments);
     final encodedSessionID = Uri.encodeComponent(session.id);
     if (agent != null) {
       await request('POST', '/api/session/$encodedSessionID/agent',
@@ -306,8 +311,44 @@ class OpenCodeApi {
     }
     await request('POST', '/api/session/$encodedSessionID/prompt', body: {
       'text': text,
+      if (attachments.isNotEmpty)
+        'files': attachments.map((attachment) => attachment.toJson()).toList(),
       if (delivery != null) 'delivery': delivery,
     });
+  }
+
+  Future<Json> attachmentModel(Session session, {Json? selectedModel}) async {
+    Json reference;
+    if (selectedModel != null) {
+      reference = selectedModel;
+    } else {
+      final currentSession = _dataObject(await request(
+        'GET',
+        '/api/session/${Uri.encodeComponent(session.id)}',
+      ));
+      reference = object(currentSession['model']);
+    }
+    if (reference.isEmpty) {
+      final data = _data(await request('GET', '/api/model/default', query: {
+        'location[directory]': session.directory,
+      }));
+      if (data is Map) {
+        return Map<String, dynamic>.from(data);
+      }
+    } else {
+      final availableModels =
+          _dataObjects(await request('GET', '/api/model', query: {
+        'location[directory]': session.directory,
+      }));
+      for (final model in availableModels) {
+        if (model['modelID'] == reference['id'] &&
+            model['providerID'] == reference['providerID']) {
+          return model;
+        }
+      }
+    }
+    throw const ApiException(0,
+        'Não foi possível confirmar a compatibilidade do modelo com os anexos. Escolha um modelo e tente novamente.');
   }
 
   Future<List<Json>> inbox(Session session) async => _dataObjects(await request(

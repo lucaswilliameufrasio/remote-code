@@ -29,6 +29,11 @@ celular. O nome comercial é provisório; o projeto técnico se chama `remote_de
 - Chat com 30 mensagens recentes no primeiro carregamento e histórico paginado por
   cursor ao rolar para mensagens antigas; atualizações recentes preservam o histórico
   carregado, com Markdown e ações de ferramenta recolhidas.
+- Botão **Anexar arquivo** no chat para PNG/JPEG/GIF/WebP, PDF e texto UTF-8.
+  Revise os nomes e remova arquivos antes de enviar. Até 4 arquivos e **5 MiB no
+  total por mensagem**; imagens e PDF exigem um modelo que informe suporte ao
+  formato. A seleção não é restaurada ao sair da tela; o rascunho persistido continua
+  sendo apenas texto. Áudio e vídeo não são enviados como anexos nesta versão.
 - Busca de agentes e modelos; mensagens podem ser enfileiradas durante uma execução.
   Editar uma mensagem de texto pendente substitui o original e coloca a versão nova
   no fim, pois a API OpenCode v2 não edita texto em posição. Mensagens com anexos ou

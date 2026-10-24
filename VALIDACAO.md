@@ -2,21 +2,30 @@
 
 ## Executado
 
-- `make validate` — formatação sem diferenças, `flutter analyze --no-fatal-infos`
-  sem issues, 63 testes Flutter/Dart e 8 testes de configuração Android/iOS.
-- `make build-check` — APK Android debug e iOS Release sem assinatura compilados.
-- `make test-ios-simulator` — fluxo de onboarding passou no simulador iOS.
+- Na entrega de anexos, as verificações foram executadas com dependências em cache
+  devido à indisponibilidade de rede: `flutter pub get --offline`,
+  `make format-check test-bootstrap`, `flutter analyze --no-pub --no-fatal-infos`
+  e `flutter test --no-pub` — sem issues, 83 testes Flutter/Dart e 8 testes nativos.
+- Android: `./gradlew --offline app:assembleDebug` em `android/` passou. A tentativa
+  `flutter build apk --debug --no-pub` falhou ao consultar dependências na rede.
+- `flutter build ios --release --no-codesign --no-pub` — iOS Release compilado.
+- `flutter drive --no-pub --driver=test_driver/integration_test.dart
+  --target=integration_test/onboarding_test.dart` — onboarding passou no simulador iOS.
 
 O APK release atual está assinado com a chave debug pela configuração Gradle do
 scaffold. Não o distribua; configure a assinatura release antes de publicar.
 
-Os testes HTTP usam `MockClient`; nenhum servidor OpenCode ou endpoint externo é
+Os testes HTTP usam `MockClient` e, para os anexos, o cliente de produção contra
+um servidor HTTP local isolado. Nenhum servidor OpenCode ou endpoint externo é
 chamado pela suíte automatizada. Há cobertura para paginação global, sessões criadas
 fora do app na tela **Trabalho**, consulta de pendências por localização, permissões,
 MCPs e skills. A paginação de recentes cobre lotes de 10, cursor opaco, ausência
 de duplicatas, fim da listagem, reinício ao atualizar e nova tentativa após falha.
 Há regressões para busca por título além da primeira página, sugestões de pastas,
 deduplicação de caminhos, falhas parciais e cancelamento sem criar uma sessão.
+Anexos: validação de conteúdo/tamanho/quantidade, leitura limitada de streams,
+cancelamento, remoção, envio somente após confirmação, fila, falha sem reenvio
+automático e resolução do modelo selecionado/da sessão/padrão.
 
 Uma consulta SSH somente leitura confirmou que a sessão relatada existe no serviço
 OpenCode v2.0.29 remoto e ocupa a posição 17 (segunda página de 10). O endpoint
@@ -38,6 +47,9 @@ Package Manager; o Flutter informa que isso poderá virar erro numa versão futu
 - O teste de simulador cobre onboarding, não a inspeção visual completa nem fala real.
 - Repetir os fluxos em dispositivos Android e iOS. O artefato iOS desta validação
   não está assinado e não é instalável diretamente em um iPhone.
+- Testar o seletor nativo de arquivos em aparelhos Android/iOS e o processamento
+  multimodal real por um modelo compatível. Não foram enviados anexos a provedores
+  reais nem executados prompts pagos nesta validação.
 
 ## Aceitação em máquina e celular reais
 
@@ -67,6 +79,9 @@ Package Manager; o Flutter informa que isso poderá virar erro numa versão futu
     confirmar que a API retorna a sessão e que o botão do topo atualiza a lista.
 18. Em **Nova sessão**, escolher um projeto/pasta sugerida sem digitar o caminho;
     repetir com caminho manual e cancelar antes da criação.
+19. Em **Anexar arquivo**, selecionar imagem/PDF/texto, remover antes do envio e
+    enviar normalmente ou pela fila. Conferir rejeição de arquivos não suportados,
+    limite total de 5 MiB e modelo sem suporte a imagens/PDF.
 
 Uma ferramenta interrompida por reboot não continua automaticamente. A retomada
 valida o histórico da sessão e uma nova continuação enviada pelo usuário.
