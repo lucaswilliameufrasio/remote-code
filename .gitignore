@@ -22,3 +22,6 @@ __pycache__/
 *.mobileprovision
 host/file-browser/node_modules/
 host/claude-code/.venv/
+/.ai-memory.toml
+/reports/
+/research_notes/
