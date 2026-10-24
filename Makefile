@@ -1,4 +1,4 @@
-.PHONY: help setup bootstrap get format format-check analyze lint test test-bootstrap test-ios-simulator validate apk-debug ios-preview-build ios-release build-check devices doctor clean test-host test-host-runtime test-mobile-simulator test-local-app setup-claude test-claude test-claude-local-app
+.PHONY: help setup bootstrap get format format-check analyze lint test test-bootstrap test-ios-simulator validate apk-debug apk-release build-apk ios-preview-build ios-release build-check devices doctor clean test-host test-host-runtime test-mobile-simulator test-local-app setup-claude test-claude test-claude-local-app
 
 .DEFAULT_GOAL := help
 
@@ -63,6 +63,11 @@ test-claude-local-app: ## Exercise the mobile Claude client with the real SDK ov
 
 apk-debug: ## Build the Android debug APK
 	flutter build apk --debug
+
+apk-release: ## Build the Android release APK
+	flutter build apk --release
+
+build-apk: apk-release ## Alias for building the Android release APK
 
 ios-preview-build: ## Build the opt-in local HTTP preview for iOS Simulator
 	flutter build ios --debug --simulator --dart-define=ALLOW_LOCAL_SERVER_HTTP=true --dart-define=USE_LOCAL_OPENCODE_SERVER=true
