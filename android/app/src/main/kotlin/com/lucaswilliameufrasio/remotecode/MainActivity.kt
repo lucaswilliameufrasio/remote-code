@@ -1,4 +1,4 @@
-package io.github.remoteopencode.app
+package com.lucaswilliameufrasio.remotecode
 
 import io.flutter.embedding.android.FlutterFragmentActivity
 

@@ -19,14 +19,18 @@ jobs:
           channel: stable
           cache: true
       - run: python3 scripts/bootstrap.py
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0, verified 2026-10-24
+        with:
+          node-version: '22'
       - run: python3 scripts/test_bootstrap.py
+      - run: make test-host
       - run: dart format lib test
       - run: flutter analyze --no-fatal-infos
       - run: flutter test
       - run: flutter build apk --debug
       - uses: actions/upload-artifact@v4
         with:
-          name: remoto-android-debug
+          name: remote-code-android-debug
           path: build/app/outputs/flutter-apk/app-debug.apk
   ios:
     runs-on: macos-latest
@@ -40,5 +44,5 @@ jobs:
       - run: flutter build ios --release --no-codesign
       - uses: actions/upload-artifact@v4
         with:
-          name: remoto-ios-unsigned
+          name: remote-code-ios-unsigned
           path: build/ios/iphoneos/Runner.app

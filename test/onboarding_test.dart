@@ -123,12 +123,12 @@ void main() {
 
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
     await tester.pumpAndSettle();
-    expect(find.text('Desbloquear Remoto'), findsOneWidget);
+    expect(find.text('Desbloquear CodeRelay'), findsOneWidget);
 
     await tester.tap(find.text('Usar biometria ou código do dispositivo'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Desbloquear Remoto'), findsNothing);
+    expect(find.text('Desbloquear CodeRelay'), findsNothing);
     expect(find.text('Seu trabalho,\nsem interrupções.'), findsOneWidget);
   });
 
@@ -147,7 +147,7 @@ void main() {
 
     await tester.pumpWidget(RemoteDevApp(store: store));
     await tester.pumpAndSettle();
-    expect(find.text('Desbloquear Remoto'), findsOneWidget);
+    expect(find.text('Desbloquear CodeRelay'), findsOneWidget);
 
     await tester.ensureVisible(find.text('Esqueci minha senha'));
     await tester.tap(find.text('Esqueci minha senha'));

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../core/api.dart';
 import '../core/models.dart';
 import '../core/store.dart';
+import 'remote_files.dart';
 
 class SessionDirectoryPicker extends StatefulWidget {
   final AppStore store;
@@ -102,6 +103,49 @@ class _SessionDirectoryPickerState extends State<SessionDirectoryPicker> {
     }
   }
 
+  Future<void> _browse(String directory) async {
+    final api = widget.apiFactory(widget.machine);
+    try {
+      final selected = await Navigator.push<String>(
+          context,
+          MaterialPageRoute(
+            builder: (_) => RemoteFilesScreen(
+                api: api, directory: directory, chooseDirectory: true),
+          ));
+      if (selected != null && mounted) {
+        Navigator.pop(context, selected);
+      }
+    } finally {
+      api.close();
+    }
+  }
+
+  Future<void> _loadAllowedRoots() async {
+    if (loading) {
+      return;
+    }
+    setState(() => loading = true);
+    final api = widget.apiFactory(widget.machine);
+    try {
+      final roots =
+          await api.allowedFileRoots(directory: widget.initialDirectory ?? '');
+      if (mounted) {
+        for (final root in roots) {
+          _addSuggestion(root);
+        }
+      }
+    } catch (exception) {
+      if (mounted) {
+        errors.add('Raízes autorizadas: $exception');
+      }
+    } finally {
+      api.close();
+      if (mounted) {
+        setState(() => loading = false);
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final search = directoryController.text.trim().toLowerCase();
@@ -125,6 +169,10 @@ class _SessionDirectoryPickerState extends State<SessionDirectoryPicker> {
               ),
             ),
             const SizedBox(height: 12),
+            TextButton.icon(
+                onPressed: loading ? null : _loadAllowedRoots,
+                icon: const Icon(Icons.folder_shared_outlined),
+                label: const Text('Carregar raízes autorizadas do host')),
             if (loading) const LinearProgressIndicator(),
             Flexible(
               child: SizedBox(
@@ -137,6 +185,14 @@ class _SessionDirectoryPickerState extends State<SessionDirectoryPicker> {
                         title:
                             Text(entry.value.isEmpty ? entry.key : entry.value),
                         subtitle: entry.value.isEmpty ? null : Text(entry.key),
+                        trailing:
+                            widget.machine.backend == AgentBackend.claudeCode
+                                ? null
+                                : IconButton(
+                                    tooltip: 'Explorar ${entry.key}',
+                                    icon: const Icon(Icons.folder_open),
+                                    onPressed: () => _browse(entry.key),
+                                  ),
                         onTap: () => Navigator.pop(context, entry.key),
                       ),
                     if (!loading && filteredSuggestions.isEmpty)

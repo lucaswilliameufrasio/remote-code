@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../core/security.dart';
 import 'common.dart';
+import 'brand.dart';
 import 'design.dart';
 
 enum _OnboardingStage {
@@ -348,21 +349,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   Widget _brandMark() {
     return Row(
       children: [
-        Container(
-          width: 46,
-          height: 46,
-          decoration: BoxDecoration(
-            color: AppColors.accentSoft,
-            borderRadius: BorderRadius.circular(16),
-          ),
-          child: const Icon(
-            Icons.terminal,
-            color: AppColors.accent,
-          ),
-        ),
+        const BrandMark(),
         const SizedBox(width: 12),
         Text(
-          'REMOTO',
+          'CodeRelay',
           style: Theme.of(context).textTheme.titleSmall?.copyWith(
                 fontWeight: FontWeight.w800,
                 letterSpacing: 1.7,
@@ -423,7 +413,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         ),
         const SizedBox(height: 14),
         Text(
-          'Retome sessões do OpenCode pelo celular, com conexão privada e proteção no próprio dispositivo.',
+          'Retome sessões do OpenCode ou Claude Code pelo celular, com conexão privada e proteção no próprio dispositivo.',
           style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                 color: AppColors.muted,
                 height: 1.5,
@@ -529,7 +519,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         ),
         const SizedBox(height: 10),
         Text(
-          'Use pelo menos ${AppSecurity.minimumPasswordLength} caracteres. A senha não será enviada ao servidor OpenCode.',
+          'Use pelo menos ${AppSecurity.minimumPasswordLength} caracteres. A senha não será enviada ao servidor do agente.',
           style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                 color: AppColors.muted,
                 height: 1.45,
@@ -598,7 +588,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         ),
         const SizedBox(height: 10),
         Text(
-          'Ela permite redefinir a senha se você esquecê-la. O Remoto não poderá mostrá-la novamente.',
+          'Ela permite redefinir a senha se você esquecê-la. O CodeRelay não poderá mostrá-la novamente.',
           style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                 color: AppColors.muted,
                 height: 1.45,
@@ -629,7 +619,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         ),
         const SizedBox(height: 12),
         const InfoBox(
-          'Anote e guarde em local seguro ou copie para um gerenciador de senhas confiável. Outros apps podem acessar ou sincronizar a área de transferência; o Remoto tentará apagar esta frase após 60 segundos ou quando você avançar.',
+          'Anote e guarde em local seguro ou copie para um gerenciador de senhas confiável. Outros apps podem acessar ou sincronizar a área de transferência; o CodeRelay tentará apagar esta frase após 60 segundos ou quando você avançar.',
           icon: Icons.warning_amber_outlined,
         ),
       ],

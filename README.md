@@ -1,8 +1,28 @@
-# Remoto — OpenCode no celular
+<img src="assets/brand/logo.png" width="128" alt="Logo CodeRelay: terminal e conexão" />
+
+# CodeRelay — suas sessões de código, onde você estiver
 
 Aplicativo Flutter para Android e iOS. Conecta a várias máquinas por Tailscale,
 lista e retoma sessões antigas sem exigir que elas já tenham sido abertas no
-celular. O nome comercial é provisório; o projeto técnico se chama `remote_dev`.
+celular. Repositório: `lucaswilliameufrasio/remote-code`. O pacote Dart interno
+continua `remote_dev` por compatibilidade; o app se chama **CodeRelay**, com
+application ID Android e bundle ID iOS `com.lucaswilliameufrasio.remotecode`.
+
+O nome combina código com a ideia de retransmitir e retomar o trabalho entre
+computador e celular. A logo une um terminal e dois pontos conectados, em
+verde-menta sobre fundo escuro. O mesmo símbolo aparece no onboarding, no
+cabeçalho e nos ícones de Android/iOS. Fonte vetorial: `assets/brand/logo.svg`.
+Para regenerar os PNGs, execute `scripts/generate_brand.py` em um ambiente Python
+com Pillow e aplique `scripts/bootstrap.py`. O bootstrap copia os ícones já
+versionados, sem precisar de Pillow. A troca visual não altera IDs, armazenamento
+seguro, recuperação nem serviços do host; não é necessária migração de dados
+da instalação Remote Code.
+
+**Migração:** a troca de identificador instala um app diferente do antigo Remoto.
+Dados do Keystore/Keychain não migram automaticamente. Mantenha a instalação antiga
+até recadastrar e conferir as máquinas no novo app; não compartilhe senhas ou a
+frase de recuperação em arquivos de configuração. Chaves internas de persistência
+e derivação de recuperação foram preservadas, não redefinidas pela renomeação.
 
 ## O que está implementado
 
@@ -10,6 +30,23 @@ celular. O nome comercial é provisório; o projeto técnico se chama `remote_de
 - HTTP Basic Auth, senha e dados locais no Android Keystore/iOS Keychain.
 - API HTTP OpenCode v2: sessões globais paginadas com busca por cursor opaco.
 - Listagem por diretório, cadastro de caminhos e abertura direta pelo ID.
+- Explorador remoto somente leitura pelo menu **Arquivos do projeto** do chat:
+  navegação por subpastas, busca até 100 resultados e prévia UTF-8 até 256 KiB.
+  **Inserir caminho no rascunho** inclui somente a referência textual ao caminho,
+  sem anexar o conteúdo nem enviar uma mensagem automaticamente. O seletor de
+  pastas também oferece **Explorar** para escolher uma subpasta conhecida.
+  Exige a extensão [File Browser](host/file-browser/README.md) configurada no host;
+  ela aplica raízes autorizadas e recusa links simbólicos. Sem a extensão, o
+  explorador falha fechado, sem voltar à API filesystem irrestrita do OpenCode.
+  No seletor de pasta, **Carregar raízes autorizadas do host** descobre as raízes
+  configuradas sem precisar memorizar seus caminhos.
+- **Ver alterações** mostra arquivos, totais de adições/remoções e patches
+  coloridos do turno mais recente da sessão, não o diff completo do Git.
+- Pareamento assistido por código temporário: depois de informar a URL HTTPS,
+  confira o destino, resgate um código de uso único e salve a máquina para persistir
+  a credencial. Também aceita QR pela câmera, validado contra a mesma origem HTTPS;
+  ler o QR apenas preenche o código, sem conectar automaticamente. A senha e a
+  entrada manual continuam disponíveis quando a câmera não puder ser usada.
 - Ao iniciar uma sessão, seletor de pasta com busca por nome/caminho e sugestões
   de projetos, sessões recentes e diretórios salvos da máquina; também aceita
   digitar outro caminho completo.
@@ -42,9 +79,13 @@ celular. O nome comercial é provisório; o projeto técnico se chama `remote_de
   Conectar/desconectar MCPs altera o estado em runtime até reiniciar o OpenCode.
 - Aprovação de permissões uma vez, sempre ou negar; perguntas pendentes em destaque,
   com respostas por opção ou texto próprio e navegação entre perguntas.
+  Permissões persistentes mostram ação, projeto e padrões antes da confirmação;
+  respostas duplicadas são bloqueadas enquanto o envio está em andamento.
+  O horário de primeira detecção neste celular é identificado como tal, sem
+  inventar um horário de criação que o servidor não informa.
 - Ditado curto no compositor: a transcrição fica editável no rascunho e não é
   enviada até tocar no botão normal de envio. O serviço de reconhecimento do
-  dispositivo pode usar rede; o Remoto não envia a gravação ao OpenCode.
+  dispositivo pode usar rede; o CodeRelay não envia a gravação ao OpenCode.
 - Até 100 atalhos recentes de sessões, identificados por máquina + ID, com
   diretório e rascunho persistentes.
 - Onboarding inicial com bloqueio local opcional por senha, biometria do
@@ -52,19 +93,36 @@ celular. O nome comercial é provisório; o projeto técnico se chama `remote_de
 - Atualização a cada 3 segundos durante execução e 10 segundos em repouso; reconexão
   com espera de até 30 segundos. Ao retornar ao app, recarrega somente as mensagens
   recentes e preserva as páginas antigas já abertas.
+  O chat informa o horário da última atualização bem-sucedida e distingue acesso
+  negado de sessão/API indisponível; isso não detecta sozinho se o PC está desligado.
+- Envio sem confirmação: persiste um marcador no armazenamento seguro antes do
+  POST e usa o ID do prompt para consultar histórico/fila, inclusive ao reabrir a
+  sessão. Enquanto não houver confirmação, bloqueia outro envio. Não usa igualdade
+  de texto como prova nem repete prompts automaticamente. Depois de conferir o
+  histórico, o usuário pode liberar um novo envio explicitamente, aceitando o risco
+  de duplicação. Isso não é garantia de execução exatamente uma vez.
 - Instaladores de serviço Linux/systemd e macOS/LaunchAgent.
 - Workflow GitHub Actions para testes, APK debug e compilação iOS sem assinatura.
 
 ## Estado da entrega
 
-Migração para a API OpenCode v2 implementada com testes de contrato HTTP. Ainda
-falta validar a integração com um servidor v2 real; consulte `VALIDACAO.md` para
-os testes e builds executados nesta entrega.
+Migração para a API OpenCode v2 implementada com testes de contrato HTTP e
+integração no simulador contra um servidor v2 real isolado, incluindo HTTPS,
+explorador restrito, reconciliação e snapshots. Aceitação autenticada no endpoint
+remoto e hardware físico permanece separada; consulte `VALIDACAO.md`.
 
-O Remoto continua sendo um cliente OpenCode v2; não integra Claude Code. Para
-Claude Code no celular, use o Remote Control oficial no app ou navegador da
-Anthropic. Uma integração embutida exigiria um adaptador de agente no host e
-contratos separados de autenticação e permissões.
+O CodeRelay suporta **OpenCode v2 e Claude Code**, com contratos separados.
+Claude Code exige o [adaptador opcional no host](host/claude-code/README.md),
+configurado com senha própria e raízes autorizadas. O app lista histórico local,
+cria sessões e continua sessões antigas em um fork confirmado, com texto, seleção
+de modelo, aprovações por uso, perguntas e interrupção. Não oferece paridade com
+os recursos OpenCode: anexos, fila, pareamento, arquivos/diff e gestão de MCP/skills
+continuam específicos do OpenCode. As credenciais Anthropic permanecem no host.
+
+No cadastro ou edição da máquina, **Como configurar no computador** abre um guia
+offline específico para o agente selecionado, com comandos copiáveis, configuração
+privada do Tailscale Serve, credenciais corretas, diagnóstico e encerramento seguro.
+O guia não executa comandos nem copia as senhas informadas no formulário.
 
 Os diretórios nativos `android/` e `ios/` são gerados por `scripts/bootstrap.py`
 usando teu SDK Flutter, evitando um scaffold nativo manual incompleto. O script
@@ -192,6 +250,22 @@ flutter run
 
 `make test-ios-simulator` executa o onboarding em um iOS Simulator inicializado.
 
+O gate completo é `make setup-claude` (uma vez, Python 3.11+) e depois
+`make validate build-check`. Inclui os testes HTTP/SQLite do adaptador Claude e
+o SDK/CLI oficial contra um modelo local determinístico, além da suíte OpenCode.
+`make test-claude-local-app DEVICE=<simulator-id>` valida a jornada Claude no
+simulador por HTTPS, sem usar conta ou credenciais reais da Anthropic.
+
+`make test-local-app DEVICE=<simulator-id>` executa o cliente e as telas de produção
+contra um OpenCode v2 real e isolado, com extensão de arquivos, projeto Git e HTTPS
+locais. Requer Python 3, OpenSSL, OpenCode e um iOS Simulator inicializado. O runner
+gera uma CA temporária confiada somente pelo cliente do teste, sem desabilitar TLS
+ou alterar Keychain/ATS. Verifica autenticação, recusas de filesystem, navegação,
+reconciliação de ACK perdido sem reenvio, anexo e diff de snapshots. O provedor de
+modelo é uma fixture OpenAI-compatible local determinística: não há inferência
+externa, credenciais reais ou cobrança. Os processos e dados temporários são
+encerrados/removidos ao final. Não valida câmera, ditado ou o endpoint remoto.
+
 Para gerar o APK de desenvolvimento ou o APK em modo release:
 
 ```bash
@@ -275,7 +349,8 @@ e os arquivos precisam continuar acessíveis na máquina de destino. A importaç
 
 O filtro por diretório consulta até 500 sessões. Para continuar além desse limite,
 use a lista global paginada. A API usa cursores opacos; o app não tenta inferir
-posição por timestamp. O histórico do chat mostra as 200 mensagens mais recentes.
+posição por timestamp. O chat abre as 30 mensagens mais recentes e permite
+carregar páginas anteriores ao rolar o histórico.
 
 ## O que reboot consegue restaurar
 
@@ -298,6 +373,26 @@ atualizado; servidores que só oferecem a API v1 não são compatíveis.
 Permissões e formulários pendentes são consultados por sessão. O app não aprova
 permissões automaticamente.
 
+O explorador usa somente o RPC `remote-code-files-v1` da extensão opcional do host.
+As raízes são escolhidas pelo operador, com negação por padrão se não configuradas;
+aberturas por descritores e `O_NOFOLLOW` recusam traversal e links simbólicos.
+Instalação e limites em [host/file-browser/README.md](host/file-browser/README.md).
+**Isso não é sandbox das ferramentas do agente** e não desativa os endpoints
+filesystem nativos para outros clientes. A lista de diretórios salvos continua
+sendo um atalho, não a fonte de autorização. Prévia de diff
+limitada a 128 Ki caracteres/2000 linhas, com aviso quando incompleta.
+
+Para parear, gere um código na **mesma instância OpenCode** que atende a URL
+cadastrada usando `opencode api post /api/pair` no computador confiável. Informe
+apenas o campo `code`, não o token ou uma URL de outro host. O resgate exige HTTPS,
+não segue redirects nem repete códigos automaticamente e confirma a versão v2.
+Não compartilhe códigos/tokens nem salve sua saída no repositório. Se o endpoint
+não estiver disponível, continue com a senha manual. Pareamento real pela tailnet
+ainda requer validação; nenhum código real foi gerado/resgatado nos testes.
+O leitor de QR processa os quadros localmente e não envia imagens. QR de outra
+origem, HTTP, com credenciais embutidas ou parâmetros extras é recusado. O teste
+automatizado injeta detecções sintéticas: não substitui teste de câmera física.
+
 ## Proteção local do aplicativo
 
 Na primeira abertura, escolha senha, biometria, as duas opções ou continue sem
@@ -318,7 +413,7 @@ do cofre local. Credenciais e dados locais continuam no Keychain/Keystore do
 sistema operacional, e a proteção do dispositivo continua necessária. O modelo
 de autenticação e os contratos da API OpenCode v2 não mudam.
 
-Sem terminal SSH interativo, editor completo, upload de anexos, notificações push,
+Sem terminal SSH interativo, editor completo, notificações push,
 VPN embutida ou sincronização de credenciais entre celulares nesta entrega.
 Polling é suspenso em segundo plano; iOS não garante execução contínua do app.
 Histórico é carregado do servidor ao abrir; não há cópia offline do chat.

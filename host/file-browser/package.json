@@ -1,0 +1,11 @@
+{
+  "name": "remote-code-file-browser",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "test": "node --test plugin.test.js",
+    "check": "node --check index.js && node --check policy.js"
+  }
+}

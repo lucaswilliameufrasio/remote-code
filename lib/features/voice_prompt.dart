@@ -268,7 +268,7 @@ class _VoicePromptSheetState extends State<VoicePromptSheet> {
             ),
             const SizedBox(height: 8),
             const Text(
-              'O reconhecimento do dispositivo pode usar serviços de rede. O Remoto não envia gravações ao OpenCode: você revisa o texto e só então escolhe enviá-lo.',
+              'O reconhecimento do dispositivo pode usar serviços de rede. O CodeRelay não envia gravações ao OpenCode: você revisa o texto e só então escolhe enviá-lo.',
             ),
             if (errorMessage != null) ...[
               const SizedBox(height: 14),

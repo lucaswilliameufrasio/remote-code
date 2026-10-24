@@ -37,7 +37,7 @@ final class LocalDeviceAuthenticator implements DeviceAuthenticator {
   Future<bool> authenticate() async {
     try {
       return await _authentication.authenticate(
-        localizedReason: 'Desbloqueie o Remoto para continuar.',
+        localizedReason: 'Desbloqueie o CodeRelay para continuar.',
         options: const AuthenticationOptions(
           biometricOnly: false,
           stickyAuth: true,

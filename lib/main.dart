@@ -118,7 +118,7 @@ class _RemoteDevAppState extends State<RemoteDevApp>
 
   @override
   Widget build(BuildContext context) => MaterialApp(
-        title: 'Remoto',
+        title: 'CodeRelay',
         debugShowCheckedModeBanner: false,
         builder: (context, navigation) => ValueListenableBuilder<_AppGateState>(
           valueListenable: _gateState,

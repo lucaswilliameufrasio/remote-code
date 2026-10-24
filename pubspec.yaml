@@ -1,5 +1,5 @@
 name: remote_dev
-description: Cliente Flutter para sessões remotas OpenCode em uma tailnet.
+description: CodeRelay — retome suas sessões de código pelo celular com OpenCode v2.
 publish_to: none
 version: 0.1.0+1
 environment:
@@ -17,6 +17,7 @@ dependencies:
   file_picker_platform_interface: ^4.0.0
   android_file_picker: ^2.0.0
   file_picker_darwin: ^2.1.2
+  mobile_scanner: ^7.2.0
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -25,3 +26,5 @@ dev_dependencies:
   flutter_lints: ^5.0.0
 flutter:
   uses-material-design: true
+  assets:
+    - assets/brand/logo.png

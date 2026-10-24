@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'prompt_attempt.dart';
 
 typedef Json = Map<String, dynamic>;
 Json object(dynamic value) =>
@@ -8,22 +9,44 @@ List<Json> objects(dynamic value) => (value is List ? value : const [])
     .map((v) => Map<String, dynamic>.from(v))
     .toList();
 
+enum AgentBackend {
+  openCode('opencode', 'OpenCode'),
+  claudeCode('claude_code', 'Claude Code');
+
+  final String value;
+  final String label;
+  const AgentBackend(this.value, this.label);
+
+  static AgentBackend parse(dynamic value) {
+    if (value == null || value == 'opencode') {
+      return openCode;
+    }
+    if (value == 'claude_code') {
+      return claudeCode;
+    }
+    throw const FormatException('Unsupported machine agent');
+  }
+}
+
 class Machine {
   final String id, name, url, username, password;
   final List<String> directories;
+  final AgentBackend backend;
   const Machine(
       {required this.id,
       required this.name,
       required this.url,
       this.username = 'opencode',
       required this.password,
-      this.directories = const []});
+      this.directories = const [],
+      this.backend = AgentBackend.openCode});
   factory Machine.fromJson(Json j) => Machine(
       id: j['id'],
       name: j['name'],
       url: j['url'],
       username: j['username'] ?? 'opencode',
       password: j['password'] ?? '',
+      backend: AgentBackend.parse(j['backend']),
       directories: List<String>.from(j['directories'] ?? []));
   Json toJson() => {
         'id': id,
@@ -31,6 +54,7 @@ class Machine {
         'url': url,
         'username': username,
         'password': password,
+        'backend': backend.value,
         'directories': directories
       };
   Machine withDirectory(String directory) => Machine(
@@ -39,6 +63,7 @@ class Machine {
       url: url,
       username: username,
       password: password,
+      backend: backend,
       directories:
           {...directories, directory}.where((d) => d.isNotEmpty).toList());
 }
@@ -47,13 +72,15 @@ class Session {
   final String id, title, directory;
   final int updated;
   final String? parentID, projectID;
+  final bool external;
   const Session(
       {required this.id,
       required this.title,
       required this.directory,
       this.updated = 0,
       this.parentID,
-      this.projectID});
+      this.projectID,
+      this.external = false});
   factory Session.fromJson(Json j) => Session(
       id: j['id'] as String,
       title: (j['title'] as String?) ?? 'Sessão sem título',
@@ -62,6 +89,7 @@ class Session {
           '',
       updated: (object(j['time'])['updated'] as num?)?.toInt() ?? 0,
       parentID: j['parentID'] as String?,
+      external: j['external'] == true,
       projectID: j['projectID'] as String?);
   Json toJson() => {
         'id': id,
@@ -69,6 +97,7 @@ class Session {
         'directory': directory,
         'time': {'updated': updated},
         'parentID': parentID,
+        if (external) 'external': true,
         if (projectID != null) 'projectID': projectID,
       };
 }
@@ -91,22 +120,28 @@ class Bookmark {
   final Session session;
   final int opened;
   final String draft;
+  final PromptAttempt? pendingPrompt;
   const Bookmark(
       {required this.machineID,
       required this.session,
       required this.opened,
-      this.draft = ''});
+      this.draft = '',
+      this.pendingPrompt});
   String get key => '$machineID:${session.id}';
   factory Bookmark.fromJson(Json j) => Bookmark(
       machineID: j['machineID'],
       session: Session.fromJson(object(j['session'])),
       opened: j['opened'] ?? 0,
-      draft: j['draft'] ?? '');
+      draft: j['draft'] ?? '',
+      pendingPrompt: j['pending_prompt'] == null
+          ? null
+          : PromptAttempt.fromJson(object(j['pending_prompt'])));
   Json toJson() => {
         'machineID': machineID,
         'session': session.toJson(),
         'opened': opened,
-        'draft': draft
+        'draft': draft,
+        if (pendingPrompt != null) 'pending_prompt': pendingPrompt!.toJson(),
       };
 }
 

@@ -3,6 +3,7 @@
 Never overwrites lib/, pubspec.yaml or an existing native project.
 """
 import argparse
+import json
 import pathlib
 import plistlib
 import re
@@ -13,9 +14,16 @@ import xml.etree.ElementTree as ET
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ANDROID = 'http://schemas.android.com/apk/res/android'
+APPLICATION_ID = 'com.lucaswilliameufrasio.remotecode'
+DISPLAY_NAME = 'CodeRelay'
 ET.register_namespace('android', ANDROID)
 
 def configure_android(path: pathlib.Path, allow_http: bool):
+    for density, size in (('mdpi', 48), ('hdpi', 72), ('xhdpi', 96),
+                          ('xxhdpi', 144), ('xxxhdpi', 192)):
+        destination = path / f'app/src/main/res/mipmap-{density}/ic_launcher.png'
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(ROOT / f'assets/brand/raster/{size}.png', destination)
     manifest = path / 'app/src/main/AndroidManifest.xml'
     tree = ET.parse(manifest)
     root = tree.getroot()
@@ -23,11 +31,19 @@ def configure_android(path: pathlib.Path, allow_http: bool):
         'android.permission.INTERNET',
         'android.permission.USE_BIOMETRIC',
         'android.permission.RECORD_AUDIO',
+        'android.permission.CAMERA',
     ):
         if not any(p.get(f'{{{ANDROID}}}name') == permission
                    for p in root.findall('uses-permission')):
             ET.SubElement(root, 'uses-permission', {f'{{{ANDROID}}}name': permission})
     queries = root.find('queries')
+    camera_feature = 'android.hardware.camera'
+    if not any(feature.get(f'{{{ANDROID}}}name') == camera_feature
+               for feature in root.findall('uses-feature')):
+        ET.SubElement(root, 'uses-feature', {
+            f'{{{ANDROID}}}name': camera_feature,
+            f'{{{ANDROID}}}required': 'false',
+        })
     if queries is None:
         queries = ET.SubElement(root, 'queries')
     recognition_action = 'android.speech.RecognitionService'
@@ -44,13 +60,14 @@ def configure_android(path: pathlib.Path, allow_http: bool):
             {f'{{{ANDROID}}}name': recognition_action},
         )
     app = root.find('application')
-    app.set(f'{{{ANDROID}}}label', 'Remoto')
+    app.set(f'{{{ANDROID}}}label', DISPLAY_NAME)
     app.set(f'{{{ANDROID}}}allowBackup', 'false')
     app.set(f'{{{ANDROID}}}usesCleartextTraffic', 'true' if allow_http else 'false')
     tree.write(manifest, encoding='utf-8', xml_declaration=True)
 
     for main_activity in path.glob('app/src/main/kotlin/**/MainActivity.kt'):
         text = main_activity.read_text()
+        text = re.sub(r'(?m)^package [\w.]+', f'package {APPLICATION_ID}', text)
         text = text.replace(
             'import io.flutter.embedding.android.FlutterActivity',
             'import io.flutter.embedding.android.FlutterFragmentActivity',
@@ -60,6 +77,7 @@ def configure_android(path: pathlib.Path, allow_http: bool):
 
     for main_activity in path.glob('app/src/main/java/**/MainActivity.java'):
         text = main_activity.read_text()
+        text = re.sub(r'(?m)^package [\w.]+;', f'package {APPLICATION_ID};', text)
         text = text.replace(
             'import io.flutter.embedding.android.FlutterActivity;',
             'import io.flutter.embedding.android.FlutterFragmentActivity;',
@@ -79,6 +97,8 @@ def configure_android(path: pathlib.Path, allow_http: bool):
     gradle = path / 'app/build.gradle.kts'
     if gradle.exists():
         text = gradle.read_text()
+        text = re.sub(r'((?:namespace|applicationId)\s*=\s*)"[^"]+"',
+                      lambda match: f'{match.group(1)}"{APPLICATION_ID}"', text)
         text = re.sub(
             r'(minSdk\s*=\s*)(flutter\.minSdkVersion|\d+)',
             lambda match: match.group(1) + '24'
@@ -90,6 +110,8 @@ def configure_android(path: pathlib.Path, allow_http: bool):
     else:
         gradle = path / 'app/build.gradle'
         text = gradle.read_text()
+        text = re.sub(r'''((?:namespace|applicationId)\s+)["'][^"']+["']''',
+                      lambda match: f'{match.group(1)}"{APPLICATION_ID}"', text)
         text = re.sub(
             r'(minSdk(?:Version)?\s+)(flutter\.minSdkVersion|\d+)',
             lambda match: match.group(1) + '24'
@@ -100,13 +122,23 @@ def configure_android(path: pathlib.Path, allow_http: bool):
         gradle.write_text(text)
 
 def configure_ios(path: pathlib.Path, allow_http: bool):
+    catalog = path / 'Runner/Assets.xcassets/AppIcon.appiconset'
+    if (catalog / 'Contents.json').exists():
+        for entry in json.loads((catalog / 'Contents.json').read_text())['images']:
+            if 'filename' in entry:
+                size = round(float(entry['size'].split('x')[0]) *
+                             float(entry['scale'].rstrip('x')))
+                shutil.copy2(ROOT / f'assets/brand/raster/{size}.png',
+                             catalog / entry['filename'])
     info = path / 'Runner/Info.plist'
     with info.open('rb') as stream:
         data = plistlib.load(stream)
-    data['CFBundleDisplayName'] = 'Remoto'
+    data['CFBundleDisplayName'] = DISPLAY_NAME
+    data['CFBundleName'] = DISPLAY_NAME
     data['NSLocalNetworkUsageDescription'] = 'Conectar aos teus servidores OpenCode pela rede privada Tailscale.'
-    data['NSFaceIDUsageDescription'] = 'Usar Face ID para desbloquear o Remoto.'
+    data['NSFaceIDUsageDescription'] = 'Usar Face ID para desbloquear o CodeRelay.'
     data['NSMicrophoneUsageDescription'] = 'Usar o microfone para ditar um prompt e revisar o texto antes de enviar.'
+    data['NSCameraUsageDescription'] = 'Ler o QR de pareamento da sua máquina. Nenhuma imagem é enviada ao servidor.'
     data['NSSpeechRecognitionUsageDescription'] = 'Transcrever o ditado para texto editável antes de enviar ao OpenCode.'
     # HTTPS is default. Direct tailnet HTTP is a developer opt-in.
     data['NSAppTransportSecurity'] = {'NSAllowsArbitraryLoads': allow_http}
@@ -123,6 +155,13 @@ def configure_ios(path: pathlib.Path, allow_http: bool):
     project = path / 'Runner.xcodeproj/project.pbxproj'
     if project.exists():
         text = project.read_text()
+        text = re.sub(
+            r'PRODUCT_BUNDLE_IDENTIFIER = ([^;]+);',
+            lambda match: f'PRODUCT_BUNDLE_IDENTIFIER = {APPLICATION_ID}'
+            + ('.RunnerTests' if match.group(1).strip().strip('"').endswith('.RunnerTests') else '')
+            + ';',
+            text,
+        )
         if 'CODE_SIGN_ENTITLEMENTS = Runner/Runner.entitlements;' not in text:
             text = text.replace('INFOPLIST_FILE = Runner/Info.plist;',
                 'INFOPLIST_FILE = Runner/Info.plist;\n\t\t\t\tCODE_SIGN_ENTITLEMENTS = Runner/Runner.entitlements;')
@@ -143,7 +182,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix='remote-dev-native-') as folder:
         target = pathlib.Path(folder) / 'remote_dev'
         subprocess.run(['flutter', 'create', '--platforms=android,ios', '--org',
-                        'io.github.remoteopencode.app', '--project-name', 'remote_dev', '--no-pub', str(target)], check=True)
+                        'com.lucaswilliameufrasio', '--project-name', 'remote_dev', '--no-pub', str(target)], check=True)
         for name in ('android', 'ios'):
             dest = ROOT / name
             if not dest.exists():

@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title description">
+  <title id="title">CodeRelay</title>
+  <desc id="description">A mint terminal with a connected relay on a midnight background.</desc>
+  <rect width="1024" height="1024" fill="#0B1418"/>
+  <rect x="208" y="240" width="608" height="496" rx="104" fill="#152C2B" stroke="#9CE5C5" stroke-width="40"/>
+  <path d="m336 408 96 80-96 80" fill="none" stroke="#9CE5C5" stroke-width="44" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M516 568h112" stroke="#9CE5C5" stroke-width="44" stroke-linecap="round"/>
+  <rect x="540" y="644" width="328" height="160" rx="80" fill="#0B1418"/>
+  <path d="M608 724h192" stroke="#9CE5C5" stroke-width="24"/>
+  <circle cx="608" cy="724" r="34" fill="#9CE5C5"/>
+  <circle cx="800" cy="724" r="34" fill="#9CE5C5"/>
+</svg>

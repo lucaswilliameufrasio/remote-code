@@ -265,7 +265,7 @@ class _AppLockScreenState extends State<AppLockScreen> {
 
   String _title() {
     return switch (_stage) {
-      _LockStage.locked => 'Desbloquear Remoto',
+      _LockStage.locked => 'Desbloquear CodeRelay',
       _LockStage.recoveryPhrase => 'Recuperar acesso',
       _LockStage.recoveryPassword => 'Definir uma nova senha',
     };

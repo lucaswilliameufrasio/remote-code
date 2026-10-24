@@ -57,6 +57,7 @@ class MainActivity : FlutterActivity()''')
             'android.permission.INTERNET',
             'android.permission.USE_BIOMETRIC',
             'android.permission.RECORD_AUDIO',
+            'android.permission.CAMERA',
         ])
         self.assertEqual(
             root.find('queries/intent/action').get(f'{{{bootstrap.ANDROID}}}name'),
@@ -72,7 +73,7 @@ class MainActivity : FlutterActivity()''')
     def test_repeated_configuration_does_not_duplicate_permission(self):
         bootstrap.configure_android(self.android, False)
         bootstrap.configure_android(self.android, False)
-        self.assertEqual(len(self.manifest().findall('uses-permission')), 3)
+        self.assertEqual(len(self.manifest().findall('uses-permission')), 4)
         self.assertEqual(len(self.manifest().findall('application/activity')), 1)
         self.assertEqual(len(self.manifest().findall('queries/intent')), 1)
         styles = (self.android / 'app/src/main/res/values/styles.xml').read_text()
@@ -86,8 +87,9 @@ class MainActivity : FlutterActivity()''')
         self.assertFalse(info['NSAppTransportSecurity']['NSAllowsArbitraryLoads'])
         self.assertEqual(info['CFBundleIdentifier'], '$(PRODUCT_BUNDLE_IDENTIFIER)')
         self.assertEqual(info['OtherSetting'], 'preserve')
-        self.assertEqual(info['CFBundleDisplayName'], 'Remoto')
-        self.assertEqual(info['NSFaceIDUsageDescription'], 'Usar Face ID para desbloquear o Remoto.')
+        self.assertEqual(info['CFBundleDisplayName'], 'CodeRelay')
+        self.assertEqual(info['CFBundleName'], 'CodeRelay')
+        self.assertEqual(info['NSFaceIDUsageDescription'], 'Usar Face ID para desbloquear o CodeRelay.')
         self.assertEqual(
             info['NSMicrophoneUsageDescription'],
             'Usar o microfone para ditar um prompt e revisar o texto antes de enviar.',
@@ -128,6 +130,63 @@ class MainActivity : FlutterActivity()''')
         self.gradle.write_text('minSdk = 26')
         bootstrap.configure_android(self.android, False)
         self.assertEqual(self.gradle.read_text(), 'minSdk = 26')
+
+    def test_android_identity_is_updated_and_configuration_is_idempotent(self):
+        self.gradle.write_text('namespace = "old.app"\napplicationId = "old.app"\nminSdk = 26')
+        activity = self.android / 'app/src/main/kotlin/example/MainActivity.kt'
+        activity.write_text('package old.app\nimport io.flutter.embedding.android.FlutterActivity\nclass MainActivity : FlutterActivity()')
+        bootstrap.configure_android(self.android, False)
+        bootstrap.configure_android(self.android, False)
+        self.assertEqual(self.gradle.read_text().count('"com.lucaswilliameufrasio.remotecode"'), 2)
+        self.assertIn('package com.lucaswilliameufrasio.remotecode', activity.read_text())
+        self.assertEqual(self.manifest().find('application').get(f'{{{bootstrap.ANDROID}}}label'), 'CodeRelay')
+
+    def test_ios_identity_updates_all_build_modes_and_preserves_test_suffix(self):
+        project = self.ios / 'Runner.xcodeproj/project.pbxproj'
+        project.write_text('PRODUCT_BUNDLE_IDENTIFIER = old.app;\nPRODUCT_BUNDLE_IDENTIFIER = old.app.RunnerTests;\nINFOPLIST_FILE = Runner/Info.plist;')
+        bootstrap.configure_ios(self.ios, False)
+        bootstrap.configure_ios(self.ios, False)
+        self.assertIn('PRODUCT_BUNDLE_IDENTIFIER = com.lucaswilliameufrasio.remotecode;', project.read_text())
+        self.assertIn('PRODUCT_BUNDLE_IDENTIFIER = com.lucaswilliameufrasio.remotecode.RunnerTests;', project.read_text())
+        self.assertNotIn('old.app', project.read_text())
+
+    def test_groovy_identity_updates_namespace_and_application_id(self):
+        self.gradle.unlink()
+        groovy = self.android / 'app/build.gradle'
+        groovy.write_text("namespace 'old.app'\napplicationId 'old.app'\nminSdkVersion 24")
+        bootstrap.configure_android(self.android, False)
+        self.assertEqual(groovy.read_text().count('"com.lucaswilliameufrasio.remotecode"'), 2)
+
+    def test_camera_is_optional_and_configuration_is_idempotent(self):
+        bootstrap.configure_android(self.android, False)
+        bootstrap.configure_android(self.android, False)
+        features = self.manifest().findall('uses-feature')
+        self.assertEqual(len(features), 1)
+        self.assertEqual(features[0].get(f'{{{bootstrap.ANDROID}}}name'), 'android.hardware.camera')
+        self.assertEqual(features[0].get(f'{{{bootstrap.ANDROID}}}required'), 'false')
+
+    def test_ios_explains_local_camera_use_for_pairing(self):
+        bootstrap.configure_ios(self.ios, False)
+        self.assertIn('Nenhuma imagem é enviada', self.plist()['NSCameraUsageDescription'])
+
+    def test_android_copies_brand_icons_at_every_density(self):
+        bootstrap.configure_android(self.android, False)
+        for density, size in (('mdpi', 48), ('hdpi', 72), ('xhdpi', 96),
+                              ('xxhdpi', 144), ('xxxhdpi', 192)):
+            self.assertEqual(
+                (self.android / f'app/src/main/res/mipmap-{density}/ic_launcher.png').read_bytes(),
+                (bootstrap.ROOT / f'assets/brand/raster/{size}.png').read_bytes(),
+            )
+
+    def test_ios_copies_brand_icons_without_changing_catalog(self):
+        catalog = self.ios / 'Runner/Assets.xcassets/AppIcon.appiconset'
+        catalog.mkdir(parents=True)
+        contents = '{"images":[{"filename":"icon.png","size":"60x60","scale":"3x"}]}'
+        (catalog / 'Contents.json').write_text(contents)
+        bootstrap.configure_ios(self.ios, False)
+        self.assertEqual((catalog / 'Contents.json').read_text(), contents)
+        self.assertEqual((catalog / 'icon.png').read_bytes(),
+                         (bootstrap.ROOT / 'assets/brand/raster/180.png').read_bytes())
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)
