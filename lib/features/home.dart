@@ -12,6 +12,7 @@ import 'projects.dart';
 import 'sessions.dart';
 import 'pairing.dart';
 import 'machine_setup.dart';
+import 'connection_diagnostics.dart';
 
 const allowTailnetHttp = bool.fromEnvironment('ALLOW_TAILNET_HTTP');
 const allowLocalServerHttp = bool.fromEnvironment('ALLOW_LOCAL_SERVER_HTTP');
@@ -1220,6 +1221,27 @@ class _MachineEditorState extends State<MachineEditor> {
                   child: Icon(Icons.folder_open_outlined),
                 ),
               ),
+            ),
+            const SizedBox(height: 18),
+            OutlinedButton.icon(
+              onPressed: saving
+                  ? null
+                  : () {
+                      if (!form.currentState!.validate()) {
+                        return;
+                      }
+                      Navigator.push<void>(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => ConnectionDiagnosticsScreen(
+                            machine: _value(),
+                            apiFactory: widget.apiFactory,
+                          ),
+                        ),
+                      );
+                    },
+              icon: const Icon(Icons.network_check),
+              label: const Text('Diagnóstico de conexão'),
             ),
             if (widget.machine != null) ...[
               const SizedBox(height: 18),

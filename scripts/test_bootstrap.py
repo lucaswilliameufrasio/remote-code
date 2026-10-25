@@ -44,6 +44,26 @@ class MainActivity : FlutterActivity()''')
         (self.ios / 'Flutter/Release.xcconfig').write_text('#include "Generated.xcconfig"\n')
     def tearDown(self):
         self.temp.cleanup()
+    def test_should_replace_debug_release_signing_idempotently(self):
+        self.gradle.write_text('''android {
+    buildTypes { release {
+        signingConfig = signingConfigs.getByName("debug")
+    } }
+}''')
+        bootstrap.configure_android_signing(self.android)
+        first = self.gradle.read_text()
+        bootstrap.configure_android_signing(self.android)
+        self.assertEqual(first, self.gradle.read_text())
+        self.assertNotIn('signingConfigs.getByName("debug")', first)
+        self.assertIn('CODERELAY_ANDROID_KEYSTORE_PATH', first)
+        self.assertIn('else null', first)
+
+    def test_should_not_overwrite_custom_release_signing(self):
+        original = 'android { signingConfig = signingConfigs.getByName("privateRelease") }'
+        self.gradle.write_text(original)
+        with self.assertRaises(ValueError):
+            bootstrap.configure_android_signing(self.android)
+        self.assertEqual(original, self.gradle.read_text())
     def manifest(self):
         return ET.parse(self.android / 'app/src/main/AndroidManifest.xml').getroot()
     def plist(self):
@@ -125,11 +145,11 @@ class MainActivity : FlutterActivity()''')
     def test_android_minimum_sdk_is_raised_without_lowering_newer_values(self):
         self.gradle.write_text('minSdk = 23')
         bootstrap.configure_android(self.android, False)
-        self.assertEqual(self.gradle.read_text(), 'minSdk = 24')
+        self.assertEqual(self.gradle.read_text().splitlines()[0], 'minSdk = 24')
 
         self.gradle.write_text('minSdk = 26')
         bootstrap.configure_android(self.android, False)
-        self.assertEqual(self.gradle.read_text(), 'minSdk = 26')
+        self.assertEqual(self.gradle.read_text().splitlines()[0], 'minSdk = 26')
 
     def test_android_identity_is_updated_and_configuration_is_idempotent(self):
         self.gradle.write_text('namespace = "old.app"\napplicationId = "old.app"\nminSdk = 26')

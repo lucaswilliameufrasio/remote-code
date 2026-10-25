@@ -63,7 +63,8 @@ class ClaudeCodeApi extends OpenCodeApi {
         info['healthy'] != true ||
         info['adapter_version'] is! String) {
       throw const ApiException(0,
-          'O destino não confirmou um adaptador CodeRelay para Claude Code v1.');
+          'O destino não confirmou um adaptador CodeRelay para Claude Code v1.',
+          code: 'INCOMPATIBLE_RESPONSE');
     }
     return {'healthy': true, 'version': info['adapter_version']};
   }

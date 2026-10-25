@@ -9,40 +9,61 @@ jobs:
   android:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
           java-version: '17'
-      - uses: subosito/flutter-action@v2
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
         with:
           channel: stable
           cache: true
       - run: python3 scripts/bootstrap.py
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0, verified 2026-10-24
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '22'
       - run: python3 scripts/test_bootstrap.py
+      - run: make test-release
       - run: make test-host
-      - run: dart format lib test
+      - run: make format-check
       - run: flutter analyze --no-fatal-infos
-      - run: flutter test
+      - run: flutter test --coverage
       - run: flutter build apk --debug
-      - uses: actions/upload-artifact@v4
+      - run: make apk-unsigned aab-unsigned lint-native-android
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: remote-code-android-debug
           path: build/app/outputs/flutter-apk/app-debug.apk
+          if-no-files-found: error
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coderelay-android-release-unsigned
+          path: |
+            build/app/outputs/flutter-apk/app-release.apk
+            build/app/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coderelay-flutter-coverage
+          path: coverage/lcov.info
+          if-no-files-found: error
   ios:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: subosito/flutter-action@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
         with:
           channel: stable
           cache: true
       - run: python3 scripts/bootstrap.py
       - run: flutter build ios --release --no-codesign
-      - uses: actions/upload-artifact@v4
+      - run: ditto -c -k --sequesterRsrc --keepParent build/ios/iphoneos/Runner.app build/ios/coderelay-ios-unsigned.zip
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: remote-code-ios-unsigned
-          path: build/ios/iphoneos/Runner.app
+          path: build/ios/coderelay-ios-unsigned.zip
+          if-no-files-found: error

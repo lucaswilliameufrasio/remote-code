@@ -1,6 +1,7 @@
 .dart_tool/
 .flutter-plugins*
 build/
+coverage/
 *.iml
 android/local.properties
 android/key.properties

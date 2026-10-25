@@ -1,5 +1,49 @@
 # Validação desta entrega
 
+## Distribuição, diagnóstico e avisos no chat — 2026-10-25
+
+- `make precommit test-ci aab-unsigned`: formatação de 75 arquivos sem alterações,
+  análise sem issues, 170 testes Flutter passando tanto sem quanto com cobertura,
+  17 testes bootstrap e 5 guardas de assinatura; testes reais de host (9 filesystem
+  Python, 5 Node, 3 runtime OpenCode, 12 HTTP/SQLite e 3 SDK Claude) passaram.
+  Lint Android release, APK debug, APK/AAB release sem assinatura e iOS release
+  sem assinatura compilaram. Cobertura disponível em `coverage/lcov.info`.
+- `make test-ios-simulator test-mobile-simulator DEVICE=<simulator-id>`:
+  onboarding e três jornadas móveis passaram no simulador iPhone 18 Pro Max.
+- `make test-local-app DEVICE=<simulator-id>` e
+  `make test-claude-local-app DEVICE=<simulator-id>` passaram duas vezes cada,
+  em sequência e em ambientes isolados. OpenCode: três jornadas, dois POSTs,
+  um ACK perdido e três chamadas ao modelo local por execução. Claude: duas
+  jornadas com SDK real e quatro chamadas ao modelo local, sem credenciais reais
+  de provedor ou inferência paga.
+- Diagnóstico exercitado com HTTPS real: confiança TLS restrita ao teste,
+  classificação de certificado não confiável, extensão/raízes disponíveis e
+  versão instalada lida pelo plugin nativo. Widget/HTTP tests cobrem relatório
+  sem dados da máquina, autenticação, rede, timeout, compatibilidade e recursos
+  indisponíveis. A tela não salva credenciais nem dispara prompts.
+- Corrigido overflow do painel de aprovações com teclado aberto. A regressão de
+  widget falhou com o cálculo antigo e passou com a altura disponível do body.
+  A jornada Claude confirmou a ação Negar visível e clicável, sem overflow nem
+  avisos de hit-test nas duas execuções finais.
+- `actionlint` v1.7.12 e `git diff --check` passaram. As referências de Actions
+  foram verificadas e fixadas por SHA; detalhes/fontes em
+  `docs/distribution-and-diagnostics.md`. O workflow remoto não foi executado
+  nesta etapa; a validação foi local.
+- APK unsigned recusado pelo verificador de assinatura e AAB sem entradas de
+  assinatura JAR. Não foram geradas nem consultadas chaves privadas. Builds
+  assinados APK/AAB/IPA e publicação nas lojas **não foram executados**: dependem
+  do keystore e do provisionamento privados do operador.
+- Avisos são somente do chat aberto, usando as consultas existentes. Não há push,
+  serviço externo, monitoramento de outras sessões ou entrega com app fechado.
+  Transição para repouso não é tratada como prova de sucesso.
+- `mobile_scanner` 7.4.2 remove o aviso KGP do scanner. Permanecem os avisos de
+  compatibilidade do `package_info_plus` 9.x (KGP) e `flutter_secure_storage`
+  9.2.4 (SPM). A atualização do armazenamento foi adiada para testar migração em
+  aparelhos com dados existentes, sem forçar overrides de dependências.
+- Aceitação física Android/iPhone, VPN real, câmera, microfone, biometria e
+  atualização de instalações antigas continuam pendentes. Nenhum aparelho físico
+  foi modificado nesta etapa. O roteiro está no documento de distribuição.
+
 ## CodeRelay e Claude Code — 2026-10-24
 
 - Identidade CodeRelay aplicada ao app, onboarding e ícones Android/iOS. Os

@@ -8,10 +8,12 @@ import 'package:http/io_client.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:remote_dev/core/api.dart';
 import 'package:remote_dev/core/attachments.dart';
+import 'package:remote_dev/core/connection_diagnostics.dart';
 import 'package:remote_dev/core/models.dart';
 import 'package:remote_dev/core/store.dart';
 import 'package:remote_dev/features/chat.dart';
 import 'package:remote_dev/features/file_changes.dart';
+import 'package:remote_dev/features/connection_diagnostics.dart';
 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
@@ -38,7 +40,18 @@ void main() {
     addTearDown(api.close);
     final untrusted = OpenCodeApi(machine);
     addTearDown(untrusted.close);
-    await expectLater(untrusted.health(), throwsA(isA<HandshakeException>()));
+    await expectLater(
+        untrusted.health(),
+        throwsA(isA<ApiException>()
+            .having((error) => error.code, 'code', 'TLS_FAILURE')));
+    final untrustedReport = await const ConnectionDiagnostics().run(machine);
+    expect(untrustedReport.connection.outcome, DiagnosticOutcome.tlsFailure);
+    final trustedReport =
+        await ConnectionDiagnostics(apiFactory: apiFor).run(machine);
+    expect(trustedReport.connection.outcome, DiagnosticOutcome.available);
+    expect(trustedReport.files?.outcome, DiagnosticOutcome.available);
+    expect(trustedReport.shareText(appVersion: '0.1.0+1'),
+        isNot(contains(project)));
     expect((await api.health())['version'], startsWith('2.'));
     final unauthorized = apiFor(const Machine(
       id: 'wrong-password',
@@ -64,6 +77,17 @@ void main() {
         api.readRemoteFile(project, 'binary.bin'),
         throwsA(isA<ApiException>()
             .having((error) => error.code, 'code', 'FILES_BINARY')));
+    await tester.pumpWidget(MaterialApp(
+        home:
+            ConnectionDiagnosticsScreen(machine: machine, apiFactory: apiFor)));
+    await tester.pumpAndSettle();
+    expect(find.text('App: 0.1.0+1'), findsOneWidget);
+    await tester.tap(find.text('Executar diagnóstico'));
+    await tester.pumpAndSettle();
+    expect(find.text('Conexão: Disponível'), findsOneWidget);
+    expect(find.text('Arquivos: Disponível'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpAndSettle();
   });
 
   testWidgets(

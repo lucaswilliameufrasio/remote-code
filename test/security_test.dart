@@ -90,7 +90,8 @@ void main() {
         await restoredSecurity.verifyPassword('another strong passphrase'),
         isTrue,
       );
-    });
+      // Exercises several real password/recovery KDF operations under coverage.
+    }, timeout: const Timeout(Duration(minutes: 2)));
 
     test('Should permit biometrics only when enrolled on the device', () async {
       const storage = FlutterSecureStorage();
