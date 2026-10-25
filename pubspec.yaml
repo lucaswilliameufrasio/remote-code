@@ -17,7 +17,8 @@ dependencies:
   file_picker_platform_interface: ^4.0.0
   android_file_picker: ^2.0.0
   file_picker_darwin: ^2.1.2
-  mobile_scanner: ^7.2.0
+  mobile_scanner: ^7.4.2
+  package_info_plus: ^9.0.1
 dev_dependencies:
   flutter_test:
     sdk: flutter

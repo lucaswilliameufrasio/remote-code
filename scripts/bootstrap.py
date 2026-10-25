@@ -120,6 +120,26 @@ def configure_android(path: pathlib.Path, allow_http: bool):
             text,
         )
         gradle.write_text(text)
+    configure_android_signing(path)
+
+
+def configure_android_signing(path: pathlib.Path):
+    """Replace only Flutter's debug release signing, preserving custom signing."""
+    gradle = path / 'app/build.gradle.kts'
+    if not gradle.exists():
+        return
+    text = gradle.read_text()
+    marker = '// BEGIN CODERELAY RELEASE SIGNING'
+    if marker in text:
+        return
+    if re.search(r'signingConfig\s*=\s*signingConfigs\.getByName\("(?!debug")[^"]+"\)', text):
+        raise ValueError('Custom release signing found; integrate CodeRelay signing manually.')
+    text = re.sub(r'(?m)^\s*// TODO: Add your own signing config for the release build\.\n', '\n', text)
+    text = re.sub(r'(?m)^\s*// Signing with the debug keys for now,.*\n', '', text)
+    text = re.sub(r'(?m)^\s*signingConfig\s*=\s*signingConfigs\.getByName\("debug"\)\s*$',
+                  '            // Release signing is configured below; never use the debug key.', text)
+    snippet = (ROOT / 'scripts/android-signing.gradle.kts').read_text()
+    gradle.write_text(f'{text.rstrip()}\n\n{snippet}')
 
 def configure_ios(path: pathlib.Path, allow_http: bool):
     catalog = path / 'Runner/Assets.xcassets/AppIcon.appiconset'

@@ -33,6 +33,23 @@ void main() {
     });
 
     testWidgets(
+        'Should announce an observed running to idle transition only once',
+        (tester) async {
+      var running = true;
+      await _show(tester, active: () => running);
+      expect(find.textContaining('O agente deixou de executar'), findsNothing);
+      running = false;
+      await tester.pump(const Duration(seconds: 3));
+      await tester.pumpAndSettle();
+      expect(
+          find.textContaining('O agente deixou de executar'), findsOneWidget);
+      await tester.pump(const Duration(seconds: 10));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('O agente deixou de executar'), findsNothing);
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
+
+    testWidgets(
         'Should display persistent patterns and allow cancelling without granting',
         (tester) async {
       var replies = 0;
@@ -50,6 +67,50 @@ void main() {
       await tester.tap(find.text('Cancelar'));
       await tester.pumpAndSettle();
       expect(replies, 0);
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
+
+    testWidgets(
+        'Should keep pending approvals scrollable with the keyboard open',
+        (tester) async {
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetDevicePixelRatio);
+      var replies = 0;
+      await _show(tester,
+          permission: true,
+          active: () => true,
+          reply: (_) async {
+            replies++;
+            return http.Response('{}', 200);
+          });
+      await tester.binding.setSurfaceSize(const Size(440, 850));
+      tester.view.viewInsets = const FakeViewPadding(bottom: 350);
+      addTearDown(tester.view.resetViewInsets);
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+      await tester.ensureVisible(find.text('Negar'));
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+      await tester.tap(find.text('Negar'));
+      await tester.pump();
+      expect(replies, 1);
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
+
+    testWidgets(
+        'Should announce a newly observed permission without its private details',
+        (tester) async {
+      var pending = false;
+      await _show(tester, pendingPermission: () => pending);
+      pending = true;
+      await tester.pump(const Duration(seconds: 10));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('O agente precisa da sua atenção'),
+          findsOneWidget);
+      await tester.pump(const Duration(seconds: 10));
+      await tester.pumpAndSettle();
+      expect(
+          find.textContaining('O agente precisa da sua atenção'), findsNothing);
       await tester.pumpWidget(const SizedBox.shrink());
     });
 
@@ -100,6 +161,8 @@ void main() {
 Future<void> _show(WidgetTester tester,
     {int sessionStatus = 200,
     bool permission = false,
+    bool Function()? active,
+    bool Function()? pendingPermission,
     Future<http.Response> Function(http.Request)? reply}) async {
   FlutterSecureStorage.setMockInitialValues({});
   final store = AppStore();
@@ -135,9 +198,17 @@ Future<void> _show(WidgetTester tester,
                   sessionStatus);
             }
             if (path == '/api/session/active') {
-              return http.Response(jsonEncode({'data': {}}), 200);
+              return http.Response(
+                  jsonEncode({
+                    'data': {
+                      if (active?.call() == true)
+                        session.id: {'type': 'running'},
+                    }
+                  }),
+                  200);
             }
-            if (path.endsWith('/permission') && permission) {
+            if (path.endsWith('/permission') &&
+                (permission || pendingPermission?.call() == true)) {
               return http.Response(
                   jsonEncode({
                     'data': [
@@ -155,5 +226,10 @@ Future<void> _show(WidgetTester tester,
             }
             return http.Response(jsonEncode({'data': [], 'cursor': {}}), 200);
           })))));
-  await tester.pumpAndSettle();
+  if (active != null) {
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+  } else {
+    await tester.pumpAndSettle();
+  }
 }

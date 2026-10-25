@@ -8,6 +8,7 @@ import '../core/attachments.dart';
 import '../core/models.dart';
 import '../core/store.dart';
 import '../core/prompt_attempt.dart';
+import '../core/session_alerts.dart';
 import 'common.dart';
 import 'design.dart';
 import 'question_response.dart';
@@ -79,6 +80,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   double previousScrollOffset = 0;
   final Set<String> queueMutations = {};
   final Set<String> permissionMutations = {};
+  final SessionAlertTracker _alertTracker = SessionAlertTracker();
   final Map<String, DateTime> permissionObservedAt = {};
   DateTime? lastUpdated;
   int? connectionStatus;
@@ -313,6 +315,20 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         lastUpdated = DateTime.now();
         failures = 0;
       });
+      final alert = _alertTracker.observe(
+        status: status,
+        pending: {
+          for (final permission in permissions)
+            if (permission['id'] case final String identifier)
+              'permission:$identifier',
+          for (final question in questions)
+            if (question['id'] case final String identifier)
+              'question:$identifier',
+        },
+      );
+      if (alert != null && ModalRoute.of(context)?.isCurrent == true) {
+        notice(context, alert.message);
+      }
       if (wasAtLatest) {
         _scrollToLatest(animate: false);
       }
@@ -1233,35 +1249,37 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       ),
       body: SafeArea(
         top: false,
-        child: Column(
-          children: [
-            _sessionStatus(),
-            if (error != null) _connectionWarning(),
-            _pendingRequests(),
-            Expanded(
-              child: loadingInitialMessages
-                  ? _loadingConversation()
-                  : messages.isEmpty
-                      ? _emptyConversation()
-                      : _conversation(),
-            ),
-            if (busy) _executionBar(),
-            if (isClaude && session.external)
-              Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(mainAxisSize: MainAxisSize.min, children: [
-                  const Text(
-                      'Histórico externo em leitura. Para conversar, crie uma continuação separada; os arquivos permanecem compartilhados.'),
-                  const SizedBox(height: 8),
-                  FilledButton(
-                      onPressed: sending ? null : _forkClaudeSession,
-                      child: const Text('Continuar no CodeRelay')),
-                ]),
-              )
-            else
-              _composer(),
-          ],
-        ),
+        child: LayoutBuilder(
+            builder: (context, constraints) => Column(
+                  children: [
+                    _sessionStatus(),
+                    if (error != null) _connectionWarning(),
+                    _pendingRequests(maxHeight: constraints.maxHeight * .36),
+                    Expanded(
+                      child: loadingInitialMessages
+                          ? _loadingConversation()
+                          : messages.isEmpty
+                              ? _emptyConversation()
+                              : _conversation(),
+                    ),
+                    if (busy) _executionBar(),
+                    if (isClaude && session.external)
+                      Padding(
+                        padding: const EdgeInsets.all(16),
+                        child:
+                            Column(mainAxisSize: MainAxisSize.min, children: [
+                          const Text(
+                              'Histórico externo em leitura. Para conversar, crie uma continuação separada; os arquivos permanecem compartilhados.'),
+                          const SizedBox(height: 8),
+                          FilledButton(
+                              onPressed: sending ? null : _forkClaudeSession,
+                              child: const Text('Continuar no CodeRelay')),
+                        ]),
+                      )
+                    else
+                      _composer(),
+                  ],
+                )),
       ),
     );
   }
@@ -1336,7 +1354,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     );
   }
 
-  Widget _pendingRequests() {
+  Widget _pendingRequests({required double maxHeight}) {
     final pendingMessages = queuedMessages;
     final pendingCount = permissions.length + questions.length;
     if (permissions.isEmpty &&
@@ -1348,7 +1366,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
     return ConstrainedBox(
       constraints: BoxConstraints(
-        maxHeight: MediaQuery.sizeOf(context).height * .36,
+        maxHeight: maxHeight,
       ),
       child: ListView(
         shrinkWrap: true,

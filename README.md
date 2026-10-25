@@ -102,7 +102,14 @@ e derivação de recuperação foram preservadas, não redefinidas pela renomea�
   histórico, o usuário pode liberar um novo envio explicitamente, aceitando o risco
   de duplicação. Isso não é garantia de execução exatamente uma vez.
 - Instaladores de serviço Linux/systemd e macOS/LaunchAgent.
-- Workflow GitHub Actions para testes, APK debug e compilação iOS sem assinatura.
+- Diagnóstico de conexão sob demanda no cadastro da máquina: conexão, TLS,
+  autenticação, compatibilidade e extensão de arquivos. Relatório copiável sem
+  URL, credenciais, caminhos ou conteúdo das sessões; mostra versões do app/servidor.
+- Avisos no chat aberto para novas pendências e transição de execução para repouso.
+  Não são push: não monitoram outras sessões nem funcionam com o app fechado.
+  Repouso não comprova sucesso; confira a resposta e eventuais erros.
+- Workflow GitHub Actions para testes/cobertura, APK debug e artefatos Android/iOS
+  release explicitamente sem assinatura, sem publicação nas lojas.
 
 ## Estado da entrega
 
@@ -251,7 +258,7 @@ flutter run
 `make test-ios-simulator` executa o onboarding em um iOS Simulator inicializado.
 
 O gate completo é `make setup-claude` (uma vez, Python 3.11+) e depois
-`make validate build-check`. Inclui os testes HTTP/SQLite do adaptador Claude e
+`make precommit` (validação, lint Android e builds Android/iOS). Inclui os testes HTTP/SQLite do adaptador Claude e
 o SDK/CLI oficial contra um modelo local determinístico, além da suíte OpenCode.
 `make test-claude-local-app DEVICE=<simulator-id>` valida a jornada Claude no
 simulador por HTTPS, sem usar conta ou credenciais reais da Anthropic.
@@ -266,29 +273,45 @@ modelo é uma fixture OpenAI-compatible local determinística: não há inferên
 externa, credenciais reais ou cobrança. Os processos e dados temporários são
 encerrados/removidos ao final. Não valida câmera, ditado ou o endpoint remoto.
 
-Para gerar o APK de desenvolvimento ou o APK em modo release:
+Comandos úteis: `make help`, `make run DEVICE=<id>`, `make test-ci` (cobertura em
+`coverage/lcov.info`), `make lint-native-android`, `make android-signing-report`.
+
+Para gerar o APK de desenvolvimento ou validar compilação release:
 
 ```bash
-flutter build apk --debug
-flutter build apk --release
+make apk-debug
+make apk-unsigned
+make aab-unsigned
 ```
 
-Artefatos: `build/app/outputs/flutter-apk/app-debug.apk` e
-`build/app/outputs/flutter-apk/app-release.apk`. A configuração Gradle atual
-assina o variant release com a chave debug; o APK release serve para validação,
-mas **não deve ser distribuído**. Configure uma chave release própria antes de
-publicar.
+Artefatos APK: `build/app/outputs/flutter-apk/app-debug.apk` e
+`build/app/outputs/flutter-apk/app-release.apk`. AAB:
+`build/app/outputs/bundle/release/app-release.aab`. **Os artefatos unsigned não
+são instaláveis/publicáveis sem assinatura.** Release nunca usa a chave debug.
+
+Para builds assinados, disponibilize pelo seu gerenciador de segredos as quatro
+variáveis `CODERELAY_ANDROID_KEYSTORE_PATH` (caminho absoluto do keystore),
+`CODERELAY_ANDROID_STORE_PASSWORD`, `CODERELAY_ANDROID_KEY_ALIAS` e
+`CODERELAY_ANDROID_KEY_PASSWORD`. Não escreva senhas em comandos, arquivos
+versionados ou histórico do shell. Depois execute `make apk-release` (alias
+`make build-apk`) ou `make build-aab`. Sem configuração completa, esses comandos
+falham antes de compilar. Mantenha backup privado da chave para futuras atualizações.
+Uma instalação antiga assinada com debug não aceita atualização com outra chave;
+não remova o app antigo sem conferir como recadastrar máquinas e preservar acesso.
 
 No iOS:
 
 ```bash
 open ios/Runner.xcworkspace
-flutter build ipa
+make build-ipa
 ```
 
-Selecione teu Development Team e um bundle identifier próprio no Xcode.
+Configure teu Development Team e provisionamento no Xcode; preserve o bundle ID
+existente para atualizar a mesma instalação.
 Um `Runner.app` sem assinatura do CI não é instalável em um iPhone comum;
 use assinatura local/TestFlight para isso.
+
+Decisões, limites e roteiro de aceitação: [distribuição e diagnóstico](docs/distribution-and-diagnostics.md).
 
 ## 3. Cadastrar máquinas no celular
 

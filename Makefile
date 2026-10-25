@@ -2,6 +2,8 @@
 
 .DEFAULT_GOAL := help
 
+.PHONY: build-aab build-ipa build-ios apk-unsigned aab-unsigned test-ci test-release lint-native-android android-signing-report precommit run
+
 help: ## Show common development commands
 	@awk 'BEGIN {FS = ":.*## "}; /^[a-zA-Z_-]+:.*## / {printf "%-24s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
@@ -27,13 +29,24 @@ lint: analyze ## Alias for Flutter static analysis
 test: test-host test-host-runtime test-claude ## Run Flutter and host tests, including isolated agent integration
 	flutter test
 
+test-ci: test-host test-host-runtime test-claude ## Run all tests and produce Flutter coverage
+	flutter test --coverage
+
+test-release: ## Check release signing guards without using real credentials
+	python3 scripts/test_release.py
+
 test-bootstrap: ## Test native project configuration
 	python3 scripts/test_bootstrap.py
 
 test-ios-simulator: ## Run the onboarding integration test on a booted iOS Simulator
-	flutter drive --driver=test_driver/integration_test.dart --target=integration_test/onboarding_test.dart
+	flutter drive $(if $(DEVICE),-d "$(DEVICE)") --driver=test_driver/integration_test.dart --target=integration_test/onboarding_test.dart
 
-validate: format-check analyze test test-bootstrap ## Run formatting, analysis, and all tests
+validate: format-check analyze test test-bootstrap test-release ## Run formatting, analysis, and all tests
+
+precommit: ## Run validation, native Android lint, and both platform builds in sequence
+	$(MAKE) validate
+	$(MAKE) lint-native-android
+	$(MAKE) build-check
 
 test-host: ## Check and test the restricted filesystem plugin against real local files
 	python3 host/file-browser/test_filesystem.py
@@ -45,7 +58,7 @@ test-host-runtime: ## Verify authentication and plugin wiring in an isolated Ope
 	python3 scripts/test_file_browser_runtime.py
 
 test-mobile-simulator: ## Exercise file review, prompt recovery and QR confirmation on iOS Simulator
-	flutter drive --no-pub --driver=test_driver/integration_test.dart --target=integration_test/mobile_workflows_test.dart
+	flutter drive $(if $(DEVICE),-d "$(DEVICE)") --no-pub --driver=test_driver/integration_test.dart --target=integration_test/mobile_workflows_test.dart
 
 test-local-app: ## Exercise real OpenCode, restricted files, prompt recovery and snapshots over local HTTPS
 	python3 scripts/test_local_app.py $(if $(DEVICE),--device $(DEVICE))
@@ -65,9 +78,33 @@ apk-debug: ## Build the Android debug APK
 	flutter build apk --debug
 
 apk-release: ## Build the Android release APK
-	flutter build apk --release
+	python3 scripts/build_release.py apk
 
 build-apk: apk-release ## Alias for building the Android release APK
+
+build-aab: ## Build a signed Android App Bundle for Google Play
+	python3 scripts/build_release.py appbundle
+
+apk-unsigned: ## Build an unsigned release APK for verification, not installation
+	python3 scripts/build_release.py apk --unsigned
+
+aab-unsigned: ## Build an unsigned App Bundle for verification, not publication
+	python3 scripts/build_release.py appbundle --unsigned
+
+build-ipa: ## Build a signed IPA using your locally configured Apple provisioning
+	flutter build ipa --release
+
+build-ios: ios-release ## Alias for the unsigned iOS verification build
+
+lint-native-android: ## Check native Android release lint
+	flutter build apk --release --config-only
+	cd android && ./gradlew :app:lintRelease
+
+android-signing-report: ## Show Android signing certificate metadata, never private keys
+	cd android && ./gradlew signingReport
+
+run: ## Run the app (optionally DEVICE=<id> from make devices)
+	flutter run $(if $(DEVICE),-d "$(DEVICE)")
 
 ios-preview-build: ## Build the opt-in local HTTP preview for iOS Simulator
 	flutter build ios --debug --simulator --dart-define=ALLOW_LOCAL_SERVER_HTTP=true --dart-define=USE_LOCAL_OPENCODE_SERVER=true
@@ -75,7 +112,7 @@ ios-preview-build: ## Build the opt-in local HTTP preview for iOS Simulator
 ios-release: ## Build the iOS Release app without code signing
 	flutter build ios --release --no-codesign
 
-build-check: apk-debug ios-release ## Build Android debug and unsigned iOS Release artifacts
+build-check: apk-debug apk-unsigned ios-release ## Build debug Android and unsigned release Android/iOS artifacts
 
 devices: ## List Flutter devices
 	flutter devices

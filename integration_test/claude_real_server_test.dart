@@ -103,6 +103,9 @@ void main() {
     await tester.tap(find.byTooltip('Enviar mensagem'));
     await until(tester, () => find.text('Uma vez').evaluate().isNotEmpty);
     expect(find.text('Sempre permitir'), findsNothing);
+    await tester.ensureVisible(find.text('Negar'));
+    await tester.pump();
+    expect(find.text('Negar').hitTestable(), findsOneWidget);
     await tester.tap(find.text('Negar'));
     await until(
         tester,

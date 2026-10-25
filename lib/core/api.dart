@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import 'models.dart';
@@ -50,7 +51,8 @@ class OpenCodeApi {
             root.split('/').contains('..') ||
             root.contains('\\'))) {
       throw const ApiException(
-          0, 'O host não informou uma lista válida de raízes autorizadas.');
+          0, 'O host não informou uma lista válida de raízes autorizadas.',
+          code: 'INCOMPATIBLE_RESPONSE');
     }
     return roots.whereType<String>().toList();
   }
@@ -92,7 +94,8 @@ class OpenCodeApi {
       final output = result['output'];
       if (output is! Map) {
         throw const ApiException(
-            0, 'Explorador restrito respondeu com formato incompatível.');
+            0, 'Explorador restrito respondeu com formato incompatível.',
+            code: 'INCOMPATIBLE_RESPONSE');
       }
       return Map<String, dynamic>.from(output);
     } on ApiException catch (exception) {
@@ -354,10 +357,21 @@ class OpenCodeApi {
           .timeout(const Duration(seconds: 20));
     } on TimeoutException {
       throw const ApiException(
-          0, 'Tempo esgotado. Confira Tailscale e servidor.');
-    } on http.ClientException {
+          0, 'Tempo esgotado. Confira Tailscale e servidor.',
+          code: 'TIMEOUT');
+    } on HandshakeException {
+      throw const ApiException(
+          0, 'Falha na conexão TLS. Confira o certificado e a URL HTTPS.',
+          code: 'TLS_FAILURE');
+    } on http.ClientException catch (exception) {
+      if (exception is SocketException) {
+        throw const ApiException(
+            0, 'Servidor inacessível. Confira rede, VPN, DNS e porta.',
+            code: 'NETWORK_UNREACHABLE');
+      }
       throw const ApiException(0,
-          'Sem conexão. Confira a VPN Tailscale, a URL e se o PC está ligado.');
+          'Sem conexão. Confira a VPN Tailscale, a URL e se o PC está ligado.',
+          code: 'NETWORK_FAILURE');
     }
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
@@ -385,7 +399,8 @@ class OpenCodeApi {
       return jsonDecode(response.body);
     } on FormatException {
       throw const ApiException(
-          0, 'Resposta incompatível com a API do agente selecionado.');
+          0, 'Resposta incompatível com a API do agente selecionado.',
+          code: 'INCOMPATIBLE_RESPONSE');
     }
   }
 
@@ -445,7 +460,8 @@ class OpenCodeApi {
     final info = object(await request('GET', '/api/info'));
     final version = info['version'];
     if (version is! String) {
-      throw const ApiException(0, 'O servidor não informou a versão.');
+      throw const ApiException(0, 'O servidor não informou a versão.',
+          code: 'INCOMPATIBLE_RESPONSE');
     }
     return {'healthy': true, 'version': version};
   }
